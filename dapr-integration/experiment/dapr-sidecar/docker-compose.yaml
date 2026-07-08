@@ -1,0 +1,62 @@
+name: pulsar-dapr
+
+services:
+  pulsar-component:
+    build: ..
+    environment:
+      DAPR_COMPONENT_SOCKET_PATH: /dapr-sockets/pulsar-pluggable.sock
+    volumes:
+      - dapr-sockets:/dapr-sockets
+      - ./certs:/certs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /dapr-sockets/pulsar-pluggable.sock || exit 1"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+    restart: unless-stopped
+
+  daprd:
+    image: daprio/daprd:1.15.4
+    command:
+      - "./daprd"
+      - "--app-id"
+      - "pulsar-tester"
+      - "--app-protocol"
+      - "http"
+      - "--app-channel-address"
+      - "client"
+      - "--app-port"
+      - "8080"
+      - "--resources-path"
+      - "/dapr/components"
+      - "--dapr-http-port"
+      - "3500"
+      - "--log-level"
+      - "debug"
+    environment:
+      DAPR_COMPONENTS_SOCKETS_FOLDER: /dapr-sockets
+    volumes:
+      - dapr-sockets:/dapr-sockets
+      - ./components:/dapr/components:ro
+    ports:
+      - "3500:3500"
+    depends_on:
+      pulsar-component:
+        condition: service_healthy
+
+  client:
+    build: ../pulsar-client
+    environment:
+      DAPR_HTTP: "http://daprd:3500"
+      PUBSUB_NAME: "pulsar-pubsub"
+      TOPIC: ""
+      APP_PORT: "8080"
+    ports:
+      - "8080:8080"
+    depends_on:
+      daprd:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  dapr-sockets:

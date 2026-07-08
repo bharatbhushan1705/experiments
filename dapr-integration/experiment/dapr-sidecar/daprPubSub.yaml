@@ -1,0 +1,32 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  # The pubsub name your client publishes/subscribes to.
+  name: pulsar-pubsub
+spec:
+  type: pubsub.pulsar-pluggable
+  version: v1
+  metadata:
+    - name: serviceUrl
+      value: "pulsar+ssl://dcr-tst-infra.maas.ing.net:6651"
+
+    # ================= TLS transport (verifying the broker) =================
+    - name: tlsTrustCertsFilePath
+      value: "/certs/ca.pem"
+    - name: tlsEnableHostnameVerification
+      value: "false"
+
+    # ================= Client identity - pick ONE =================
+    # (1) PEM client certificate (standard mTLS). Key MUST be PKCS#8 PEM.
+    - name: tlsCertFile
+      value: "/certs/client.crt"
+    - name: tlsKeyFile
+      value: "/certs/client.key"
+
+    # ================= Subscription =================
+    - name: subscriptionType
+      value: "Shared"
+    - name: subscriptionName
+      value: "dapr-subscription"
+    - name: subscriptionInitialPosition
+      value: "Earliest"

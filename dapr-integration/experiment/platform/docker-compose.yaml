@@ -1,0 +1,169 @@
+name: experimental-platform-multiple-proxies
+networks:
+    default:
+        name: maas-multiple-proxies-experimental-network
+        external: true
+services:
+  identity:
+    image: apachepulsar/pulsar:4.1.0
+    container_name: pulsar-identity
+    environment:
+      AUDIENCE: "maas"
+      PULSAR_LOG_LEVEL: INFO
+    volumes:
+      - ../.ignore.identities/broker:/maas/identities/broker
+      - ../.ignore.identities/proxy:/maas/identities/proxy
+      - ../.ignore.identities/admin:/maas/identities/control-plane
+      - ../.ignore.identities/trust:/maas/identities/trust
+      - ../.ignore.identities/client:/maas/identities/client
+  openssl-utility:
+    image: ubuntu:latest
+    container_name: utility
+    volumes:
+      - ../.ignore.identities/client:/home/certs
+      - ./scripts:/scripts
+    environment:
+      VOLUME_PATH: /home/certs
+      P12_FILE: keystore.p12
+      P12_PASSWORD: changeme
+    command:
+      - /bin/bash
+      - /scripts/extract-pem.sh
+    depends_on:
+        identity:
+            condition: service_completed_successfully
+  zookeeper:
+    image: apachepulsar/pulsar:4.1.0
+    container_name: pulsar-zookeeper
+    hostname: zookeeper
+    restart: on-failure
+    environment:
+      metadataStoreUrl: zk:zookeeper:2181
+      MODE: zookeeper
+      PULSAR_LOG_LEVEL: INFO
+    expose:
+      - "2181"
+    healthcheck:
+      test: [ "CMD", "bin/pulsar-zookeeper-ruok.sh" ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+  pulsar-init:
+    hostname: pulsar-init
+    image: apachepulsar/pulsar:4.1.0
+    container_name: pulsar-init
+    command: >
+      bin/pulsar initialize-cluster-metadata --cluster "${clusterName:-maas}" --zookeeper zookeeper:2181 --configuration-store zookeeper:2181 --web-service-url https://broker-1:8081,broker-2:8081 --broker-service-url pulsar+ssl://broker-1:6651,broker-2:6651
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+  bookkeeper:
+    image: apachepulsar/pulsar:4.1.0
+    container_name: pulsar-bookkeeper
+    environment:
+      MODE: bookkeeper
+      PULSAR_LOG_LEVEL: INFO
+      BOOKIE_MEM: -Xms512m -Xmx512m -XX:MaxDirectMemorySize=256m
+      clusterName: ${clusterName:-maas}
+      BK_DATA_DIR: /data/bookkeeper
+      JAVA_OPTS: -Dbookkeeper.metadata.client.drivers=org.apache.pulsar.metadata.bookkeeper.PulsarMetadataClientDriver
+    restart: on-failure
+    expose:
+      - "3181"
+      - "8080"
+    healthcheck:
+      test: [ "CMD", "curl", "-s", "http://localhost:8080/heartbeat" ]
+      interval: 30s
+      timeout: 3s
+      retries: 60
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+      pulsar-init:
+        condition: service_completed_successfully
+  broker:
+    image: apachepulsar/pulsar:4.1.0
+    container_name: pulsar-broker
+    hostname: broker
+    environment:
+      MODE: broker
+      PULSAR_LOG_LEVEL: INFO
+      PULSAR_PREFIX_allowAutoTopicCreation: "true"
+      PULSAR_PREFIX_allowAutoTopicCreationType: "non-partitioned"
+      PULSAR_PREFIX_allowAutoSubscriptionCreation: "true"
+      PULSAR_PREFIX_authorizationEnabled: "false"
+      PULSAR_PREFIX_authenticationEnabled: "true"
+      PULSAR_PREFIX_advertisedAddress: broker
+      PULSAR_PREFIX_superUserRoles: spiffe://nonprod.ing.com/v1/P10530/global-dev/broker,spiffe://nonprod.ing.com/v1/P10530/global-dev/proxy,spiffe://nonprod.ing.com/v1/P10530/global-dev/control-plane,spiffe://nonprod.ing.com/v1/P10530/global-dev
+    volumes:
+      - ../.ignore.identities/broker:/data/broker
+      - ../.ignore.identities/trust:/data/trust
+    healthcheck:
+      test: [ "CMD", "curl", "-s", "http://localhost:8080/metrics" ]
+      interval: 30s
+      timeout: 3s
+      retries: 60
+    depends_on:
+      identity:
+        condition: service_completed_successfully
+      bookkeeper:
+        condition: service_started
+      zookeeper:
+        condition: service_healthy
+  proxy:
+    image: apachepulsar/pulsar:4.1.0
+    container_name: pulsar-proxy
+    hostname: proxy
+    environment:
+      MODE: proxy
+      PULSAR_LOG_LEVEL: INFO
+      PULSAR_PREFIX_brokerWebServiceURLTLS: ''
+      PULSAR_PREFIX_brokerServiceURLTLS: ''
+    volumes:
+      - ../.ignore.identities/proxy:/data/proxy
+      - ../.ignore.identities/trust:/data/trust
+      - ../.ignore.identities/admin:/data/client
+    ports:
+      - "6651:6651"
+      - "8081:8081"
+    depends_on:
+      identity:
+        condition: service_completed_successfully
+      broker-1:
+        condition: service_healthy
+      broker-2:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-s", "-L", "http://localhost:8080/metrics" ]
+      interval: 30s
+      timeout: 3s
+      retries: 60
+  metadata-init:
+    image: p10530maasacr.azurecr.io/ing-maas-pulsar:${revision}
+    container_name: metadata-init
+    environment:
+      PULSAR_LOG_LEVEL: INFO
+      client_webServiceUrl: https://proxy:8081
+      client_brokerServiceUrl: pulsar+ssl://proxy:6651
+      client_tlsKeyStorePath: /data/client/keystore.p12
+      client_tlsTrustStorePath: /data/trust/truststore.p12
+      client_tlsKeyStorePassword: changeme
+      client_tlsTrustStorePassword: changeme
+      client_tlsTrustStoreType: PKCS12
+      client_tlsKeyStoreType: PKCS12
+      client_authParams: '{"keyStoreType":"PKCS12","keyStorePath":"/data/client/keystore.p12","keyStorePassword":"changeme"}'
+    volumes:
+      - ../.ignore.identities/admin:/data/client
+      - ../.ignore.identities/trust:/data/trust
+    depends_on:
+      identity:
+        condition: service_completed_successfully
+      proxy:
+        condition: service_healthy
+    command:
+      - bash
+      - -c
+      - |
+        bin/apply-config-from-env-with-prefix.py client_ conf/client.conf && \
+        bin/pulsar-admin tenants create ${tenantName:-tenant} && \
+        bin/pulsar-admin namespaces create ${tenantName:-tenant}/${namespaceName:-namespace}

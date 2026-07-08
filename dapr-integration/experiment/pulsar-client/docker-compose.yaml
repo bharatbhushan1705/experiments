@@ -1,0 +1,84 @@
+name: experimental-clients-multiple-proxies
+networks:
+  default:
+    name: maas-multiple-proxies-experimental-network
+    external: true
+services:
+  openssl-keystore-utility:
+    image: ubuntu:latest
+    volumes:
+      - ../.ignore.identities/admin:/home/certs
+      - ./scripts:/scripts
+    environment:
+      VOLUME_PATH: /home/certs
+      P12_FILE: keystore.p12
+      P12_PASSWORD: changeme
+    command:
+      - /bin/bash
+      - /scripts/extract-pem.sh
+  openssl-truststore-utility:
+    image: ubuntu:latest
+    volumes:
+      - ../.ignore.identities/trust:/home/certs
+      - ./scripts:/scripts
+    environment:
+      VOLUME_PATH: /home/certs
+      P12_FILE: truststore.p12
+      P12_PASSWORD: changeme
+    command:
+      - /bin/bash
+      - /scripts/extract-pem.sh
+  consumer:
+    image: apachepulsar/pulsar:4.1.0
+    container_name: ha-proxy-consumer
+    environment:
+      PULSAR_LOG_LEVEL: INFO
+      client_webServiceUrl: https://${clusterName:-maas}-haproxy:8081
+      client_brokerServiceUrl: pulsar+ssl://${clusterName:-maas}-haproxy:6651
+      client_tlsKeyStorePath: ''
+      client_tlsTrustStorePath: ''
+      client_useKeyStoreTls: false
+      client_tlsAllowInsecureConnection: true
+      client_authPlugin: org.apache.pulsar.client.impl.auth.AuthenticationTls
+      client_authParams: 'tlsCertFile:/data/client/cert.pem,tlsKeyFile:/data/client/privkey.key'
+    volumes:
+      - ../.ignore.identities/admin:/data/client
+      - ../.ignore.identities/trust:/data/trust
+    depends_on:
+      openssl-keystore-utility:
+        condition: service_completed_successfully
+      openssl-truststore-utility:
+        condition: service_completed_successfully
+    command:
+      - bash
+      - -c
+      - |
+        bin/apply-config-from-env-with-prefix.py client_ conf/client.conf && \
+        bin/pulsar-perf consume persistent://${tenantName:-tenant}/${namespaceName:-namespace}/ha-proxy-topic -s subscription -time 0
+  producer:
+    image: apachepulsar/pulsar:4.1.0
+    container_name: ha-proxy-producer
+    environment:
+      PULSAR_LOG_LEVEL: INFO
+      client_webServiceUrl: https://${clusterName:-maas}-haproxy:8081
+      client_brokerServiceUrl: pulsar+ssl://${clusterName:-maas}-haproxy:6651
+      client_tlsKeyStorePath: ''
+      client_tlsTrustStorePath: ''
+      client_useKeyStoreTls: false
+      client_tlsAllowInsecureConnection: true
+      client_authPlugin: org.apache.pulsar.client.impl.auth.AuthenticationTls
+      client_authParams: 'tlsCertFile:/data/client/cert.pem,tlsKeyFile:/data/client/privkey.key'
+    volumes:
+      - ../.ignore.identities/admin:/data/client
+      - ../.ignore.identities/trust:/data/trust
+    depends_on:
+      openssl-keystore-utility:
+        condition: service_completed_successfully
+      openssl-truststore-utility:
+        condition: service_completed_successfully
+    command:
+      - bash
+      - -c
+      - |
+        bin/apply-config-from-env-with-prefix.py client_ conf/client.conf && \
+        bin/pulsar-perf produce persistent://${tenantName:-tenant}/${namespaceName:-namespace}/ha-proxy-topic -r 10 -time 0
