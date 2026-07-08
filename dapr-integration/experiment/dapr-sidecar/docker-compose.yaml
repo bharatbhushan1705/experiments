@@ -31,11 +31,15 @@ services:
       KEYSTORE_PASSWORD: changeme
     command: ["/bin/bash", "/gen-app-cert.sh"]
 
-  # The pluggable Pulsar component. To use YOUR prebuilt image instead of building
-  # here, replace `build:` + `image:` with:  image: <your-acr>/pulsar-pluggable:<tag>
+  # The pluggable Pulsar component. To use YOUR prebuilt image instead of building here,
+  # set PLUGGABLE_IMAGE=<your-acr>/pulsar-pluggable:<tag> (skips the Go build entirely).
   pulsar-pluggable:
     build: ./pluggable-component
-    image: pulsar-pluggable:local
+    image: ${PLUGGABLE_IMAGE:-pulsar-pluggable:local}
+    environment:
+      # Your image reads this to place its socket; daprd scans this folder by default.
+      # (The built-in component ignores it and uses the same default folder anyway.)
+      DAPR_COMPONENT_SOCKET_PATH: /tmp/dapr-components-sockets/pulsar-pluggable.sock
     volumes:
       - dapr-sockets:/tmp/dapr-components-sockets
       - ./certs:/certs:ro

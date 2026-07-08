@@ -1,0 +1,7 @@
+# Go module + vendored files must keep LF endings. On Windows, git's autocrlf can
+# rewrite vendor/modules.txt to CRLF, which breaks `go build -mod=vendor` with
+# "inconsistent vendoring". Treat them as binary so git never converts line endings.
+vendor/** -text
+go.mod   -text
+go.sum   -text
+*.go     text eol=lf

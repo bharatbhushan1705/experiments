@@ -26,8 +26,13 @@ docker run --rm \
   -v "${DIR}/scripts/prep-certs.sh:/prep.sh:ro" \
   ubuntu:latest bash /prep.sh
 
-echo "[3] build the pluggable component image"
-docker compose build pulsar-pluggable
+if [[ -n "${PLUGGABLE_IMAGE:-}" ]]; then
+  echo "[3] using prebuilt pluggable image ${PLUGGABLE_IMAGE} (skipping build)"
+  docker pull "${PLUGGABLE_IMAGE}"
+else
+  echo "[3] build the pluggable component image (offline, vendored)"
+  docker compose build pulsar-pluggable
+fi
 
 echo "[4] up (app-cert-init generates the app HTTPS keystore, then the stack starts)"
 docker compose up -d

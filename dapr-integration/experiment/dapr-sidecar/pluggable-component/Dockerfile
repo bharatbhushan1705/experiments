@@ -2,8 +2,9 @@
 # build a fully static binary and drop it into a distroless image.
 FROM golang:1.22-bookworm AS build
 WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
+# Dependencies are vendored (./vendor), so the build needs NO network / Go proxy —
+# important behind a corporate firewall. GOPROXY=off guarantees no outbound fetch.
+ENV GOFLAGS=-mod=vendor GOPROXY=off
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/pulsar-pluggable .
 

@@ -19,8 +19,13 @@ dump() {
 say "clean slate"
 $DC down -v --remove-orphans 2>/dev/null
 
-say "0) build the pluggable component image"
-$DC build pulsar-pluggable || fail "component build failed"
+if [[ -n "${PLUGGABLE_IMAGE:-}" ]]; then
+  say "0) using prebuilt pluggable image: ${PLUGGABLE_IMAGE} (skipping build)"
+  docker pull "${PLUGGABLE_IMAGE}" || fail "could not pull ${PLUGGABLE_IMAGE}"
+else
+  say "0) build the pluggable component image"
+  $DC build pulsar-pluggable || fail "component build failed (offline vendored build; see README if behind a proxy)"
+fi
 
 say "1) generate certs (Pulsar PKI + app keystore)"
 $DC up --exit-code-from certs-init certs-init || fail "cert generation failed"

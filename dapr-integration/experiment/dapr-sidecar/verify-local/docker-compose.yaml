@@ -8,8 +8,8 @@
 #     -> Pulsar standalone that REQUIRES a trusted client cert AND authenticates it
 #   consumer reads the topic back over mTLS.
 #
-# Reuses the cert/standalone scripts from custom-client/test-local. Orchestrated by
-# verify.sh (staged startup: the pluggable socket must exist before daprd boots).
+# Orchestrated by verify.sh (staged startup: the pluggable socket must exist before
+# daprd boots).
 name: dapr-pluggable-verify
 
 services:
@@ -17,11 +17,9 @@ services:
     image: ubuntu:latest
     volumes:
       - certs:/certs
-      - ../../custom-client/test-local/gen-test-certs.sh:/gen-test-certs.sh:ro
+      - ./gen-test-certs.sh:/gen-test-certs.sh:ro
     environment:
       OUT_DIR: /certs/pulsar
-      URI_ONLY: "false"     # DNS:pulsar SAN -> component can fully verify the server
-      FORCE: "${FORCE_CERTS:-false}"
     command: ["/bin/bash", "/gen-test-certs.sh"]
 
   app-cert-init:
@@ -40,7 +38,7 @@ services:
     hostname: pulsar
     volumes:
       - certs:/certs
-      - ../../custom-client/test-local/pulsar-standalone-tls.sh:/pulsar-standalone-tls.sh:ro
+      - ./pulsar-standalone-tls.sh:/pulsar-standalone-tls.sh:ro
     command: ["/bin/bash", "/pulsar-standalone-tls.sh"]
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/6651' 2>/dev/null || exit 1"]
@@ -50,9 +48,14 @@ services:
       start_period: 40s
 
   # our pluggable Pulsar component (real client-cert auth). Creates the UDS socket.
+  # Set PLUGGABLE_IMAGE=<your-acr>/pulsar-pluggable:<tag> to use your prebuilt image
+  # instead of building here (skips the Go build entirely).
   pulsar-pluggable:
     build: ../pluggable-component
-    image: pulsar-pluggable:local
+    image: ${PLUGGABLE_IMAGE:-pulsar-pluggable:local}
+    environment:
+      # Your image reads this to place its socket; daprd scans this folder by default.
+      DAPR_COMPONENT_SOCKET_PATH: /tmp/dapr-components-sockets/pulsar-pluggable.sock
     volumes:
       - dapr-sockets:/tmp/dapr-components-sockets
       - certs:/certs:ro

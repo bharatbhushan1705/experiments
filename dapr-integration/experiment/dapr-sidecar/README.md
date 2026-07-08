@@ -31,7 +31,7 @@ Pulsar client. That is the only way to get client-cert mTLS **auth** through Dap
 | Approach | Cert in Dapr config? | Real mTLS auth? | Public images only? |
 |---|---|---|---|
 | Built-in `pubsub.pulsar` | ❌ no such field | ❌ | ✅ |
-| Transport bridge (ghostunnel/haproxy) — see [../custom-client/test-local/](../custom-client/test-local/) | ❌ (cert in bridge) | ❌ needs broker `anonymousUserRole`¹ | ✅ |
+| Transport bridge (ghostunnel/haproxy), explored and discarded | ❌ (cert in bridge) | ❌ needs broker `anonymousUserRole`¹ | ✅ |
 | **Pluggable component (this dir)** | ✅ | ✅ | ✅ (build one Dockerfile) |
 
 ¹ A transport bridge presents the cert at the TLS layer, but Pulsar authentication is an
@@ -79,20 +79,30 @@ docker compose logs -f consumer        # got message ...
 ## Swap in your own (ING) pluggable image
 
 The component here is an **open-source stand-in** with the same component type and the
-same metadata contract as your private `pulsar-pluggable`. To use yours, replace the
-`build:`/`image:` of the `pulsar-pluggable` service in [docker-compose.yaml](docker-compose.yaml):
+same metadata contract as your private `pulsar-pluggable`. To use yours, set an env var
+(no file edits, no Go build) — it works for both `start.sh` and `verify-local`:
 
-```yaml
-  pulsar-pluggable:
-    image: p10530maasacr.azurecr.io/pulsar-pluggable:<tag>   # your ACR build
-    volumes:
-      - dapr-sockets:/tmp/dapr-components-sockets
-      - ./certs:/certs:ro
+```bash
+export PLUGGABLE_IMAGE=p10530maasacr.azurecr.io/pulsar-pluggable:<tag>
+./start.sh                      # or:  cd verify-local && ./verify.sh
 ```
-`daprPubSub.yaml` stays exactly the same — the cert is still configured in Dapr.
+`daprPubSub.yaml` stays exactly the same — the cert is still configured in Dapr. Your
+image just needs to register its socket as `pulsar-pluggable.sock`.
+
+## Troubleshooting the build
+
+- **`net/http: TLS handshake timeout` on `go mod download`** — a firewall is blocking the
+  Go module proxy. Deps are vendored so this shouldn't happen; if you removed `vendor/`,
+  either restore it or set `GOPROXY` to your internal Artifactory.
+- **`inconsistent vendoring ... not marked as explicit in vendor/modules.txt`** — your copy
+  of `vendor/modules.txt` is out of sync (a partial file copy, or Windows CRLF conversion).
+  Fix: get a clean copy via `git clone`/`git pull` (the included `.gitattributes` keeps
+  `vendor/` LF-only), **or** skip the build with `PLUGGABLE_IMAGE=<your image>`, **or**
+  regenerate where a Go proxy is reachable: `cd pluggable-component && rm -rf vendor && go mod vendor`.
 
 ## Notes / assumptions
 
+- The component's Go dependencies are **vendored** (`pluggable-component/vendor/`) and the Dockerfile builds with `GOPROXY=off`, so the image builds **fully offline** — no Go module proxy needed (works behind a corporate firewall). To refresh deps where a proxy is reachable: `go mod vendor`. (Alternative: delete `vendor/`, remove `GOPROXY=off`/`GOFLAGS` from the Dockerfile, and set `GOPROXY` to your internal Artifactory.)
 - Java app runs from source via **JEP 330** (`java CustomClient.java`) on `eclipse-temurin:21-jdk` — no Dockerfile, no Maven.
 - `daprd` runs as root so it can reach the socket the component creates on the shared volume (default folder `/tmp/dapr-components-sockets`).
 - `tlsEnableHostnameVerification=false` + `tlsAllowInsecureConnection=true` in the component match the platform's `client.conf` posture (SPIFFE certs without DNS SANs). Tighten if your proxy cert has a matching DNS SAN.
