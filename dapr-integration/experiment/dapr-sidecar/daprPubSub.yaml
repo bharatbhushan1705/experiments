@@ -1,29 +1,47 @@
 apiVersion: dapr.io/v1alpha1
 kind: Component
 metadata:
-  # The pubsub name your client publishes/subscribes to.
+  # The pub/sub name the app publishes to: POST /v1.0/publish/pulsar-pubsub/<topic>
   name: pulsar-pubsub
 spec:
+  # Served by the pluggable component over the UDS socket "pulsar-pluggable.sock".
+  # (Swap the pluggable-component image for your ACR build; this YAML stays the same.)
   type: pubsub.pulsar-pluggable
   version: v1
   metadata:
+    # Local platform proxy (docker network). For the external cluster this was
+    # pulsar+ssl://dcr-tst-infra.maas.ing.net:6651
     - name: serviceUrl
-      value: "pulsar+ssl://dcr-tst-infra.maas.ing.net:6651"
+      value: "pulsar+ssl://proxy:6651"
 
-    # ================= TLS transport (verifying the broker) =================
-    - name: tlsTrustCertsFilePath
-      value: "/certs/ca.pem"
-    - name: tlsEnableHostnameVerification
-      value: "false"
-
-    # ================= Client identity - pick ONE =================
-    # (1) PEM client certificate (standard mTLS). Key MUST be PKCS#8 PEM.
+    # ================= Client identity (mTLS) — cert configured HERE, in Dapr config =====
+    # The pluggable component calls pulsar.NewAuthenticationTLS(tlsCertFile, tlsKeyFile),
+    # so Dapr authenticates to Pulsar as a real per-client role (auth_method=tls).
+    # Key MUST be PKCS#8 PEM.
     - name: tlsCertFile
       value: "/certs/client.crt"
     - name: tlsKeyFile
       value: "/certs/client.key"
+    - name: tlsTrustCertsFilePath
+      value: "/certs/ca.pem"
+    # Platform SPIFFE certs have no DNS SAN for "proxy"; match client.conf's posture.
+    - name: tlsEnableHostnameVerification
+      value: "false"
+    - name: tlsAllowInsecureConnection
+      value: "true"
 
-    # ================= Subscription =================
+    # ================= Topic addressing =================
+    # persistent://<tenant>/<namespace>/<topic>. Must match what metadata-init created
+    # on the platform (${tenantName:-tenant}/${namespaceName:-namespace}).
+    - name: tenant
+      value: "tenant"
+    - name: namespace
+      value: "namespace"
+    - name: persistent
+      value: "true"
+
+    # ================= Subscription (only used if this pubsub also SUBSCRIBES) =========
+    # The custom-client is a producer, so these are inert here.
     - name: subscriptionType
       value: "Shared"
     - name: subscriptionName

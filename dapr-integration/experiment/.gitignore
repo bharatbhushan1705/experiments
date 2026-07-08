@@ -1,0 +1,3 @@
+# Generated secrets / identities — never commit
+**/.ignore.identities/
+**/certs/

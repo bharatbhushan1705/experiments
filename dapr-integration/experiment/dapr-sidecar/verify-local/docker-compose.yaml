@@ -1,0 +1,126 @@
+# Self-contained verification of the PLUGGABLE-COMPONENT design (public images + the
+# component we build here — no private ACR image, no anonymousUserRole hack).
+#
+# Proves REAL per-client mTLS auth end to end:
+#   custom-client (Java, HTTPS self-signed)
+#     -> daprd (loads pubsub.pulsar-pluggable over UDS)
+#     -> pulsar-pluggable (our Go component; NewAuthenticationTLS -> auth_method=tls)
+#     -> Pulsar standalone that REQUIRES a trusted client cert AND authenticates it
+#   consumer reads the topic back over mTLS.
+#
+# Reuses the cert/standalone scripts from custom-client/test-local. Orchestrated by
+# verify.sh (staged startup: the pluggable socket must exist before daprd boots).
+name: dapr-pluggable-verify
+
+services:
+  certs-init:
+    image: ubuntu:latest
+    volumes:
+      - certs:/certs
+      - ../../custom-client/test-local/gen-test-certs.sh:/gen-test-certs.sh:ro
+    environment:
+      OUT_DIR: /certs/pulsar
+      URI_ONLY: "false"     # DNS:pulsar SAN -> component can fully verify the server
+      FORCE: "${FORCE_CERTS:-false}"
+    command: ["/bin/bash", "/gen-test-certs.sh"]
+
+  app-cert-init:
+    image: ubuntu:latest
+    volumes:
+      - certs:/certs
+      - ../../custom-client/scripts/gen-app-cert.sh:/gen-app-cert.sh:ro
+    environment:
+      OUT_DIR: /certs
+      KEYSTORE_PASSWORD: changeme
+    command: ["/bin/bash", "/gen-app-cert.sh"]
+
+  # stand-in for the mTLS platform: authentication ENABLED, no anonymous role.
+  pulsar:
+    image: apachepulsar/pulsar:4.1.0
+    hostname: pulsar
+    volumes:
+      - certs:/certs
+      - ../../custom-client/test-local/pulsar-standalone-tls.sh:/pulsar-standalone-tls.sh:ro
+    command: ["/bin/bash", "/pulsar-standalone-tls.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/6651' 2>/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 40s
+
+  # our pluggable Pulsar component (real client-cert auth). Creates the UDS socket.
+  pulsar-pluggable:
+    build: ../pluggable-component
+    image: pulsar-pluggable:local
+    volumes:
+      - dapr-sockets:/tmp/dapr-components-sockets
+      - certs:/certs:ro
+
+  # the Dapr sidecar: loads pubsub.pulsar-pluggable from the shared socket folder.
+  daprd:
+    image: daprio/daprd:1.15.4
+    user: "0:0"   # root so it can connect to the socket the component created
+    depends_on:
+      pulsar-pluggable:
+        condition: service_healthy   # wait until the UDS socket exists
+    volumes:
+      - dapr-sockets:/tmp/dapr-components-sockets
+      - ./components:/components:ro
+    command:
+      - "./daprd"
+      - "--app-id"
+      - "custom-client"
+      - "--app-protocol"
+      - "https"
+      - "--app-port"
+      - "8443"
+      - "--app-channel-address"
+      - "custom-client"
+      - "--dapr-http-port"
+      - "3500"
+      - "--resources-path"
+      - "/components"
+      - "--log-level"
+      - "debug"
+
+  custom-client:
+    image: eclipse-temurin:21-jdk
+    hostname: custom-client
+    working_dir: /app
+    volumes:
+      - ../../custom-client/app:/app:ro
+      - certs:/certs:ro
+    environment:
+      DAPR_HTTP: "http://daprd:3500"
+      PUBSUB_NAME: "pulsar-pubsub"
+      TOPIC: "custom-client-topic"
+      APP_PORT: "8443"
+      KEYSTORE_PATH: "/certs/app-keystore.p12"
+      KEYSTORE_PASSWORD: "changeme"
+      PUBLISH_COUNT: "10"
+      PUBLISH_INTERVAL_MS: "500"
+    command: ["java", "CustomClient.java"]
+
+  consumer:
+    image: apachepulsar/pulsar:4.1.0
+    volumes:
+      - certs:/certs:ro
+    environment:
+      client_brokerServiceUrl: pulsar+ssl://pulsar:6651
+      client_authPlugin: org.apache.pulsar.client.impl.auth.AuthenticationTls
+      client_authParams: tlsCertFile:/certs/pulsar/client.crt,tlsKeyFile:/certs/pulsar/client.key
+      client_tlsAllowInsecureConnection: "true"
+      client_tlsEnableHostnameVerification: "false"
+      client_useKeyStoreTls: "false"
+    command:
+      - bash
+      - -c
+      - |
+        bin/apply-config-from-env-with-prefix.py client_ conf/client.conf && \
+        exec bin/pulsar-client consume persistent://public/default/custom-client-topic \
+          -s verify-sub -p Earliest -n 0
+
+volumes:
+  certs:
+  dapr-sockets:

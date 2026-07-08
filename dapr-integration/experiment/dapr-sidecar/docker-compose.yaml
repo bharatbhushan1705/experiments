@@ -1,61 +1,118 @@
+# The Dapr side of the experiment, targeting the local platform cluster.
+#
+#   custom-client (Java, HTTPS self-signed)  [../custom-client/app]
+#     -> daprd  (loads pubsub.pulsar-pluggable from daprPubSub.yaml)
+#     -> pulsar-pluggable  (presents the client cert -> real mTLS auth to Pulsar)
+#     -> platform proxy:6651
+#   consumer reads the topic back directly from the platform over mTLS.
+#
+# Certs in ./certs:
+#   client.crt / client.key / ca.pem   <- from the platform identities (scripts/prep-certs.sh)
+#   app-keystore.p12                    <- the app's self-signed HTTPS cert (app-cert-init)
+#
+# Verified end to end in ./verify-local (stock mTLS Pulsar). Here we point at the
+# real platform. Bring it up with ./start.sh (after the platform is running).
 name: pulsar-dapr
 
+networks:
+  default:
+    name: maas-multiple-proxies-experimental-network
+    external: true
+
 services:
-  pulsar-component:
-    build: ..
-    environment:
-      DAPR_COMPONENT_SOCKET_PATH: /dapr-sockets/pulsar-pluggable.sock
+  # generates the app's self-signed HTTPS keystore into ./certs/app-keystore.p12
+  app-cert-init:
+    image: ubuntu:latest
     volumes:
-      - dapr-sockets:/dapr-sockets
+      - ./certs:/certs
+      - ../custom-client/scripts/gen-app-cert.sh:/gen-app-cert.sh:ro
+    environment:
+      OUT_DIR: /certs
+      KEYSTORE_PASSWORD: changeme
+    command: ["/bin/bash", "/gen-app-cert.sh"]
+
+  # The pluggable Pulsar component. To use YOUR prebuilt image instead of building
+  # here, replace `build:` + `image:` with:  image: <your-acr>/pulsar-pluggable:<tag>
+  pulsar-pluggable:
+    build: ./pluggable-component
+    image: pulsar-pluggable:local
+    volumes:
+      - dapr-sockets:/tmp/dapr-components-sockets
       - ./certs:/certs:ro
-    healthcheck:
-      test: ["CMD-SHELL", "test -S /dapr-sockets/pulsar-pluggable.sock || exit 1"]
-      interval: 3s
-      timeout: 2s
-      retries: 30
     restart: unless-stopped
 
   daprd:
     image: daprio/daprd:1.15.4
+    user: "0:0"   # root: connect to the socket the component created on the shared volume
+    volumes:
+      - dapr-sockets:/tmp/dapr-components-sockets
+      - ./daprPubSub.yaml:/components/daprPubSub.yaml:ro
     command:
       - "./daprd"
       - "--app-id"
-      - "pulsar-tester"
+      - "custom-client"
       - "--app-protocol"
-      - "http"
-      - "--app-channel-address"
-      - "client"
+      - "https"
       - "--app-port"
-      - "8080"
-      - "--resources-path"
-      - "/dapr/components"
+      - "8443"
+      - "--app-channel-address"
+      - "custom-client"
       - "--dapr-http-port"
       - "3500"
+      - "--resources-path"
+      - "/components"
       - "--log-level"
       - "debug"
-    environment:
-      DAPR_COMPONENTS_SOCKETS_FOLDER: /dapr-sockets
-    volumes:
-      - dapr-sockets:/dapr-sockets
-      - ./components:/dapr/components:ro
     ports:
       - "3500:3500"
     depends_on:
-      pulsar-component:
-        condition: service_healthy
+      pulsar-pluggable:
+        condition: service_healthy   # wait until the UDS socket exists
 
-  client:
-    build: ../pulsar-client
+  # the custom Java producer (source lives in ../custom-client/app)
+  custom-client:
+    image: eclipse-temurin:21-jdk
+    hostname: custom-client
+    working_dir: /app
+    volumes:
+      - ../custom-client/app:/app:ro
+      - ./certs:/certs:ro
     environment:
       DAPR_HTTP: "http://daprd:3500"
       PUBSUB_NAME: "pulsar-pubsub"
-      TOPIC: ""
-      APP_PORT: "8080"
+      TOPIC: "custom-client-topic"
+      APP_PORT: "8443"
+      KEYSTORE_PATH: "/certs/app-keystore.p12"
+      KEYSTORE_PASSWORD: "changeme"
+      PUBLISH_COUNT: "10"
+      PUBLISH_INTERVAL_MS: "1000"
     ports:
-      - "8080:8080"
+      - "8443:8443"
     depends_on:
       daprd:
         condition: service_started
+    restart: unless-stopped
+
+  # reads the topic straight from the platform over mTLS (the "other pulsar-client")
+  consumer:
+    image: apachepulsar/pulsar:4.1.0
+    container_name: custom-client-consumer
+    volumes:
+      - ./certs:/certs:ro
+    environment:
+      client_brokerServiceUrl: pulsar+ssl://proxy:6651
+      client_authPlugin: org.apache.pulsar.client.impl.auth.AuthenticationTls
+      client_authParams: tlsCertFile:/certs/client.crt,tlsKeyFile:/certs/client.key
+      client_tlsAllowInsecureConnection: "true"
+      client_tlsEnableHostnameVerification: "false"
+      client_useKeyStoreTls: "false"
+    command:
+      - bash
+      - -c
+      - |
+        bin/apply-config-from-env-with-prefix.py client_ conf/client.conf && \
+        exec bin/pulsar-client consume persistent://tenant/namespace/custom-client-topic \
+          -s custom-client-consumer -p Earliest -n 0
     restart: unless-stopped
 
 volumes:

@@ -1,0 +1,30 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: pulsar-pubsub
+spec:
+  # Loaded from the pluggable component's UDS socket "pulsar-pluggable.sock".
+  type: pubsub.pulsar-pluggable
+  version: v1
+  metadata:
+    # verify-local Pulsar (stock standalone, mTLS-required)
+    - name: serviceUrl
+      value: "pulsar+ssl://pulsar:6651"
+
+    # Client identity (mTLS) — the certs are configured HERE, in the Dapr config.
+    - name: tlsCertFile
+      value: "/certs/pulsar/client.crt"
+    - name: tlsKeyFile
+      value: "/certs/pulsar/client.key"
+    - name: tlsTrustCertsFilePath
+      value: "/certs/pulsar/ca.pem"
+    # test server cert carries DNS:pulsar, so we can do full hostname verification
+    - name: tlsEnableHostnameVerification
+      value: "true"
+
+    - name: tenant
+      value: "public"
+    - name: namespace
+      value: "default"
+    - name: persistent
+      value: "true"
