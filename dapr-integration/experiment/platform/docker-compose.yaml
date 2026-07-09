@@ -1,11 +1,11 @@
-name: experimental-platform-multiple-proxies
+name: maas-platform-experiment
 networks:
     default:
-        name: maas-multiple-proxies-experimental-network
+        name: maas-platform-experiment-network
         external: true
 services:
   identity:
-    image: apachepulsar/pulsar:4.1.0
+    image: p10530maasacr.azurecr.io/ing-maas-pulsar-dev-identity:${revision}
     container_name: pulsar-identity
     environment:
       AUDIENCE: "maas"
@@ -15,12 +15,11 @@ services:
       - ../.ignore.identities/proxy:/maas/identities/proxy
       - ../.ignore.identities/admin:/maas/identities/control-plane
       - ../.ignore.identities/trust:/maas/identities/trust
-      - ../.ignore.identities/client:/maas/identities/client
   openssl-utility:
     image: ubuntu:latest
     container_name: utility
     volumes:
-      - ../.ignore.identities/client:/home/certs
+      - ../.ignore.identities/admin:/home/certs
       - ./scripts:/scripts
     environment:
       VOLUME_PATH: /home/certs
@@ -33,7 +32,7 @@ services:
         identity:
             condition: service_completed_successfully
   zookeeper:
-    image: apachepulsar/pulsar:4.1.0
+    image: p10530maasacr.azurecr.io/ing-maas-pulsar-dev:${revision}
     container_name: pulsar-zookeeper
     hostname: zookeeper
     restart: on-failure
@@ -50,7 +49,7 @@ services:
       retries: 30
   pulsar-init:
     hostname: pulsar-init
-    image: apachepulsar/pulsar:4.1.0
+    image: p10530maasacr.azurecr.io/ing-maas-pulsar-dev:${revision}
     container_name: pulsar-init
     command: >
       bin/pulsar initialize-cluster-metadata --cluster "${clusterName:-maas}" --zookeeper zookeeper:2181 --configuration-store zookeeper:2181 --web-service-url https://broker:8081 --broker-service-url pulsar+ssl://broker:6651
@@ -58,7 +57,7 @@ services:
       zookeeper:
         condition: service_healthy
   bookkeeper:
-    image: apachepulsar/pulsar:4.1.0
+    image: p10530maasacr.azurecr.io/ing-maas-pulsar-dev:${revision}
     container_name: pulsar-bookkeeper
     environment:
       MODE: bookkeeper
@@ -82,7 +81,7 @@ services:
       pulsar-init:
         condition: service_completed_successfully
   broker:
-    image: apachepulsar/pulsar:4.1.0
+    image: p10530maasacr.azurecr.io/ing-maas-pulsar-dev:${revision}
     container_name: pulsar-broker
     hostname: broker
     environment:
@@ -94,10 +93,13 @@ services:
       PULSAR_PREFIX_authorizationEnabled: "false"
       PULSAR_PREFIX_authenticationEnabled: "true"
       PULSAR_PREFIX_advertisedAddress: broker
-      PULSAR_PREFIX_superUserRoles: spiffe://nonprod.ing.com/v1/P10530/global-dev/broker,spiffe://nonprod.ing.com/v1/P10530/global-dev/proxy,spiffe://nonprod.ing.com/v1/P10530/global-dev/control-plane,spiffe://nonprod.ing.com/v1/P10530/global-dev
+      PULSAR_PREFIX_superUserRoles: spiffe://nonprod.ing.com/v1/P10530/global-dev/broker,spiffe://nonprod.ing.com/v1/P10530/global-dev/proxy,spiffe://nonprod.ing.com/v1/P10530/global-dev/control-plane,spiffe://nonprod.ing.com/v1/P10530/global-dev/client
     volumes:
       - ../.ignore.identities/broker:/data/broker
       - ../.ignore.identities/trust:/data/trust
+    expose:
+      - "6651"
+      - "8081"
     healthcheck:
       test: [ "CMD", "curl", "-s", "http://localhost:8080/metrics" ]
       interval: 30s
@@ -111,7 +113,7 @@ services:
       zookeeper:
         condition: service_healthy
   proxy:
-    image: apachepulsar/pulsar:4.1.0
+    image: p10530maasacr.azurecr.io/ing-maas-pulsar-dev:${revision}
     container_name: pulsar-proxy
     hostname: proxy
     environment:
@@ -141,8 +143,8 @@ services:
     container_name: metadata-init
     environment:
       PULSAR_LOG_LEVEL: INFO
-      client_webServiceUrl: https://proxy:8081
-      client_brokerServiceUrl: pulsar+ssl://proxy:6651
+      client_webServiceUrl: https://${clusterName:-maas}-proxy:8081
+      client_brokerServiceUrl: pulsar+ssl://${clusterName:-maas}-proxy:6651
       client_tlsKeyStorePath: /data/client/keystore.p12
       client_tlsTrustStorePath: /data/trust/truststore.p12
       client_tlsKeyStorePassword: changeme
