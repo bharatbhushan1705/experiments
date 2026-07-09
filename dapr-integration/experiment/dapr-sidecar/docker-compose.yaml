@@ -1,13 +1,5 @@
-# The Dapr sidecar for the experiment, targeting the local platform cluster
-# (authentication DISABLED on the platform — see conf/daprPubSub.yaml).
-#
-# This stack is ONLY the messaging middleware:
-#   daprd (built-in pubsub.pulsar) -> platform proxy (pulsar+ssl://maas-proxy:6651)
-#
-# The producer lives in ../cots-client — any COTS app with HTTP/curl capability
-# publishes via daprd's API without knowing anything about Pulsar.
-# Effective topic: persistent://tenant/namespace/<bare-topic> (the built-in component
-# adds the tenant/namespace prefix from conf/daprPubSub.yaml).
+# Dapr sidecar (daprd) with the built-in Pulsar component (conf/daprPubSub.yaml).
+# Producer lives in ../cots-client. Optional consumer is profile-gated.
 name: pulsar-dapr
 
 networks:
@@ -32,21 +24,17 @@ services:
       - "--log-level"
       - "debug"
     ports:
-      - "3500:3500"   # publish from the host too: see README
+      - "3500:3500"
 
-  # OPTIONAL verification consumer — NOT started by default (the pulsar-client stack
-  # is the real consumer). Enable with:  docker compose --profile consumer up -d
+  # verification consumer, not started by default:
+  #   docker compose --profile consumer up -d
   consumer:
     image: apachepulsar/pulsar:4.1.0
     container_name: dapr-experiment-consumer
     profiles: ["consumer"]
     environment:
       client_brokerServiceUrl: pulsar://maas-proxy:6650
-      # TLS variants (re-enable with auth):
-#      client_brokerServiceUrl: pulsar+ssl://maas-proxy:6651
-#      client_tlsAllowInsecureConnection: "true"
-#      client_tlsEnableHostnameVerification: "false"
-#      client_useKeyStoreTls: "false"
+      # TLS variant (with auth): pulsar+ssl://maas-proxy:6651 + tls client settings
       tenantName: "${TENANT:-tenant}"
       namespaceName: "${NAMESPACE:-namespace}"
       topicName: "${TOPIC:-topic}"

@@ -1,29 +1,21 @@
 apiVersion: dapr.io/v1alpha1
 kind: Component
 metadata:
-  # The pub/sub name the producer publishes to: POST /v1.0/publish/pulsar-pubsub/<topic>
   name: pulsar-pubsub
 spec:
-  # Dapr's BUILT-IN Pulsar component — no pluggable component, no extra container.
-  # This works ONLY because the platform has authentication DISABLED: the built-in
-  # component cannot present a client certificate (no tlsCertFile/tlsKeyFile fields).
-  # The mTLS-capable pluggable-component setup is preserved on branch
-  # experiment/dapr-pulsar-mtls; the plan is to contribute client-cert mTLS upstream
-  # to dapr/components-contrib so this built-in component can do it natively.
+  # Built-in Dapr Pulsar component. Works while platform auth is disabled;
+  # it has no client-cert fields (mTLS setup: branch experiment/dapr-pulsar-mtls).
   type: pubsub.pulsar
   version: v1
   metadata:
-    # Plain transport — the platform runs plain listeners while auth is disabled.
-    # TLS variant (re-enable with auth): host pulsar+ssl://maas-proxy:6651
+    # TLS variant (with auth): pulsar+ssl://maas-proxy:6651
     - name: host
       value: "pulsar://maas-proxy:6650"
     - name: enableTLS
       value: "false"
 
-    # The built-in component ALWAYS builds the full topic name itself:
-    # persistent://<tenant>/<namespace>/<topic-from-publish-URL>.
-    # So the producer publishes with the BARE topic name (e.g. "topic"), and these
-    # must match what the platform's metadata-init created.
+    # topics are published with bare names; the component builds
+    # persistent://<tenant>/<namespace>/<topic>
     - name: tenant
       value: "tenant"
     - name: namespace

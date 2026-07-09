@@ -1,36 +1,19 @@
 #!/usr/bin/env bash
+# Start the platform (Pulsar cluster).
 set -euo pipefail
 
-echo "Starting platform with docker compose..."
-
-# Resolve script location so this works from any current directory.
-
 PLATFORM_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
+cd "${PLATFORM_DIR}"
 
-CURRENT_DIR=$(pwd)
-
-docker network create maas-platform-experiment-network || true
+docker network create maas-platform-experiment-network 2>/dev/null || true
 
 echo "[1] docker compose build --no-cache"
-cd "${PLATFORM_DIR}"
 docker compose build --no-cache
-cd "${CURRENT_DIR}"
 
-echo "[2] remove identities (if it exists)"
-if [[ -d "${PLATFORM_DIR}/.ignore.identities" ]]; then
-  rm -rf "${PLATFORM_DIR}/.ignore.identities"
-fi
+echo "[2] reset generated identities"
+rm -rf "$(dirname "${PLATFORM_DIR}")/.ignore.identities"
 
-echo "[3] docker compose up -d"
-cd "${PLATFORM_DIR}"
+echo "[3] docker compose up -d --wait"
 docker compose up -d --wait --wait-timeout 300
-cd "${CURRENT_DIR}"
 
-CLIENTS_IDENTITIES_DIR="$(dirname "$PLATFORM_DIR")/client/.ignore.identities"
-echo "[4] copy generated identities to ${CLIENTS_IDENTITIES_DIR}"
-# Replace destination contents with newly generated identities.
-rm -rf "${CLIENTS_IDENTITIES_DIR:?}/"*
-mkdir -p "${CLIENTS_IDENTITIES_DIR}"
-cp -R "${PLATFORM_DIR}/.ignore.identities/" "${CLIENTS_IDENTITIES_DIR}/"
-
-echo "Platform is setup. You can now run the client to execute the experiment."
+echo "Platform is up (proxy: pulsar://maas-proxy:6650, http://maas-proxy:8080)."

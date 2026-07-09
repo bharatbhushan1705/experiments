@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
+# Start the pulsar-client (consumer). Needs the platform up with 6650/8080 published.
 set -euo pipefail
 
-echo "Starting platform with docker compose..."
-
-# Resolve script location so this works from any current directory.
-
 CLIENT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
-
-CURRENT_DIR=$(pwd)
-
-docker network create experimental-maas-client-network || true
-echo "[1] docker compose up -d"
 cd "${CLIENT_DIR}"
+
+docker network create experimental-maas-client-network 2>/dev/null || true
+
+echo "[1] docker compose up -d --wait"
 docker compose up -d --wait --wait-timeout 300
-cd "${CURRENT_DIR}"
+
+echo "pulsar-client is up. Logs: docker compose logs -f consumer"
