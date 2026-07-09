@@ -18,7 +18,7 @@ topic is `persistent://tenant/namespace/<topic>`.
 ```bash
 ../dapr-sidecar/start.sh        # daprd must be up first
 docker compose up -d
-docker compose logs -f producer # PUBLISHED {"id":"1-1","source":"cots-client",...}
+docker compose logs -f producer # burst 1: 1000 msgs total, ~2500 msg/s
 ```
 
 Or run the whole experiment at once (platform must be up):
@@ -28,20 +28,18 @@ Or run the whole experiment at once (platform must be up):
 
 ## Throughput
 
-Two modes, both plain curl (see the compose header for all knobs):
+One fixed mode: endless bursts of `BURST` messages, each burst a single
+`curl -Z` invocation multiplexing over `PARALLEL_MAX` keep-alive connections.
 
 ```bash
-docker compose up -d                                          # loop: 1 msg/s (default)
-INTERVAL=0 CONCURRENCY=8 LOG_EVERY=200 docker compose up -d   # loop, max rate
-BURST=5000 INTERVAL=5 docker compose up -d                    # burst: one parallel curl per batch
+docker compose up -d                       # bursts of 1000 (default)
+BURST=5000 PARALLEL_MAX=100 docker compose up -d
 ```
 
 **Measured end-to-end** (curl → daprd → built-in component → Pulsar, 2-core machine):
 
-| Mode | Rate | Bottleneck |
+| Setup | Rate | Bottleneck |
 |---|---|---|
-| Loop, 1 worker | ~80 msg/s | curl process spawn per message |
-| Loop, 8 workers (saturation) | **~180 msg/s** | process spawn; >8 workers degrades |
 | Burst (`-Z` parallel keep-alive, 50 conns) | **~2,500 msg/s** (peaks 5,000) | CPU/daprd — not curl anymore |
 
 Broker-side verified: `msgInCounter` matched the published count.
@@ -51,8 +49,8 @@ Capacity planning (e.g. 15K transactions/period):
 | Requirement | Feasible with this curl client? |
 |---|---|
 | 15K per **annum / day / hour** | ✅ trivially (≤ ~4.2 msg/s) |
-| 15K per **minute** (250 msg/s) | ✅ loop mode at saturation, or any burst |
-| 15K as a batch | ✅ burst mode: **~3–6 seconds** |
+| 15K per **minute** (250 msg/s) | ✅ any burst setting |
+| 15K as a batch | ✅ `BURST=15000`: **~3–6 seconds** |
 | Sustained 15K **per second** | ❌ use a pooled HTTP load client (hey/wrk/k6) or a Pulsar SDK — the Dapr sidecar is not the limiting factor |
 
 The point of this client is integration simplicity, not raw speed: the same publish

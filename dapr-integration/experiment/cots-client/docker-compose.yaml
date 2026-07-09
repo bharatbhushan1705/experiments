@@ -1,17 +1,11 @@
 # curl producer publishing to Pulsar through the Dapr sidecar.
+# Publishes endless bursts at maximum throughput; stop with 'docker compose down'.
 #
 # Env:
-#   DAPR_HTTP     dapr base URL                          (default http://daprd:3500)
-#   TOPIC         bare topic name                        (default topic)
-#   INTERVAL      seconds between messages/bursts, 0 = none      (default 1)
-#   CONCURRENCY   parallel loops in loop mode            (default 1)
-#   COUNT         messages (loop) / bursts (burst), 0 = endless  (default 0)
-#   LOG_EVERY     log every Nth publish                  (default 1)
-#   BURST         >0 = burst mode, messages per batch    (default 0 = loop mode)
-#   PARALLEL_MAX  parallel connections in burst mode     (default 50)
-#
-# Burst batches share one JSON body. Finite COUNT runs restart (compose policy);
-# stop them with 'docker compose down'.
+#   DAPR_HTTP     dapr base URL          (default http://daprd:3500)
+#   TOPIC         bare topic name        (default topic)
+#   BURST         messages per burst     (default 1000)
+#   PARALLEL_MAX  parallel connections   (default 50)
 name: cots-client
 
 networks:
@@ -26,11 +20,7 @@ services:
       DAPR_HTTP: "${DAPR_HTTP:-http://daprd:3500}"
       PUBSUB_NAME: "${PUBSUB_NAME:-pulsar-pubsub}"
       TOPIC: "${TOPIC:-topic}"
-      INTERVAL: "${INTERVAL:-1}"
-      CONCURRENCY: "${CONCURRENCY:-1}"
-      COUNT: "${COUNT:-0}"
-      LOG_EVERY: "${LOG_EVERY:-1}"
-      BURST: "${BURST:-0}"
+      BURST: "${BURST:-1000}"
       PARALLEL_MAX: "${PARALLEL_MAX:-50}"
     restart: unless-stopped
     entrypoint: ["/bin/sh", "-c"]
@@ -40,43 +30,17 @@ services:
         until curl -fsS "$${DAPR_HTTP}/v1.0/healthz" >/dev/null 2>&1; do
           echo "waiting for daprd at $${DAPR_HTTP}..."; sleep 2
         done
-
-        if [ "$${BURST}" -gt 0 ]; then
-          echo "BURST mode: $${BURST} msgs/batch, parallel-max $${PARALLEL_MAX}, interval $${INTERVAL}s"
-          n=0; : > /tmp/urls.cfg
-          while [ "$$n" -lt "$${BURST}" ]; do echo "url = \"$$URL\"" >> /tmp/urls.cfg; n=$$((n+1)); done
-          b=0
-          while [ "$${COUNT}" -eq 0 ] || [ "$$b" -lt "$${COUNT}" ]; do
-            b=$$((b+1))
-            BODY="{\"burst\":$$b,\"source\":\"cots-client\",\"ts\":\"$$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"text\":\"hello from cots-client burst $$b\"}"
-            S=$$(date +%s)
-            if curl -fsS -Z --parallel-max "$${PARALLEL_MAX}" -X POST -H "Content-Type: application/json" \
-                 -d "$$BODY" --config /tmp/urls.cfg >/dev/null 2>&1; then
-              E=$$(date +%s); D=$$((E-S)); [ "$$D" -eq 0 ] && D=1
-              echo "BURST $$b: PUBLISHED $${BURST} msgs in $${D}s (~$$((BURST/D)) msg/s)"
-            else
-              echo "BURST $$b: FAILED"
-            fi
-            [ "$${INTERVAL}" != "0" ] && sleep "$${INTERVAL}"
-          done
-          echo "done ($$b bursts)"; exit 0
-        fi
-
-        echo "publishing to topic '$${TOPIC}' every $${INTERVAL}s (concurrency $${CONCURRENCY})"
-        worker() {
-          w=$$1; i=0
-          while [ "$${COUNT}" -eq 0 ] || [ "$$i" -lt "$${COUNT}" ]; do
-            i=$$((i+1))
-            BODY="{\"id\":\"$$w-$$i\",\"source\":\"cots-client\",\"ts\":\"$$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"text\":\"hello from cots-client $$w-$$i\"}"
-            if curl -fsS -X POST -H "Content-Type: application/json" -d "$$BODY" "$$URL" >/dev/null; then
-              [ $$((i % LOG_EVERY)) -eq 0 ] && echo "PUBLISHED $$BODY"
-            else
-              echo "PUBLISH FAILED ($$w-$$i)"
-            fi
-            [ "$${INTERVAL}" != "0" ] && sleep "$${INTERVAL}"
-          done
-          echo "worker $$w done ($$i messages)"
-        }
-        w=1
-        while [ "$$w" -le "$${CONCURRENCY}" ]; do worker "$$w" & w=$$((w+1)); done
-        wait
+        i=0; while [ "$$i" -lt "$${BURST}" ]; do echo "url = \"$$URL\""; i=$$((i+1)); done > /tmp/urls.cfg
+        echo "publishing bursts of $${BURST} msgs (parallel-max $${PARALLEL_MAX}) to topic '$${TOPIC}'"
+        S=$$(date +%s); b=0
+        while :; do
+          b=$$((b+1))
+          BODY="{\"burst\":$$b,\"source\":\"cots-client\",\"text\":\"hello from cots-client burst $$b\"}"
+          if curl -fsS -Z --parallel-max "$${PARALLEL_MAX}" --parallel-immediate -X POST \
+               -H "Content-Type: application/json" -d "$$BODY" --config /tmp/urls.cfg >/dev/null 2>&1; then
+            E=$$(date +%s); D=$$((E-S)); [ "$$D" -eq 0 ] && D=1
+            echo "burst $$b: $$((b*BURST)) msgs total, ~$$((b*BURST/D)) msg/s"
+          else
+            echo "burst $$b: FAILED"; sleep 1
+          fi
+        done
