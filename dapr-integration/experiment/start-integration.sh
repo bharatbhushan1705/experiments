@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# Start all components in sequence: platform -> pulsar-client -> dapr-sidecar -> cots-client.
-# Each component that is already running is skipped.
-#
-#   ./start-integration.sh          start everything, then check messages flow
-#   ./start-integration.sh down     stop everything except the platform
+# Start all components in sequence: platform -> pulsar-client -> dapr-sidecar -> cots-client,
+# then check messages flow. Each component that is already running is skipped.
+# To stop, use ./cleanup-integration.sh
 set -uo pipefail
 DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 cd "${DIR}"
@@ -18,14 +16,6 @@ dump() {
   echo "--- producer ---"; (cd cots-client && docker compose logs --tail=10 producer 2>/dev/null)
   echo "--- consumer ---"; docker logs --tail=10 maas-consumer 2>/dev/null
 }
-
-if [[ "${1:-}" == "down" ]]; then
-  (cd cots-client && docker compose down --remove-orphans)
-  (cd dapr-sidecar && docker compose --profile consumer down --remove-orphans)
-  (cd pulsar-client && docker compose down --remove-orphans)
-  echo "Stopped cots-client, dapr-sidecar, pulsar-client. Platform left running."
-  exit 0
-fi
 
 say "1) platform"
 if running pulsar-proxy; then
@@ -86,5 +76,5 @@ done
 [[ "$received" -ge 1 ]] || fail "no messages seen by the pulsar-client consumer"
 
 printf '\n\033[1;32mPASS: cots-client -> daprd -> platform Pulsar -> pulsar-client consumer (%s messages)\033[0m\n' "$received"
-echo "Stop everything except the platform:  ./start-integration.sh down"
+echo "Stop the clients, keep the platform:  ./cleanup-integration.sh clients"
 echo "Full teardown including the platform: ./cleanup-integration.sh"

@@ -66,8 +66,8 @@ cd ../cots-client && docker compose up -d      # the producer
 or everything at once, with an end-to-end assertion:
 
 ```bash
-../start-integration.sh     # PASS: N messages flowed cots-client -> daprd -> Pulsar -> consumer
-../start-integration.sh down
+../start-integration.sh             # PASS: N messages flowed cots-client -> daprd -> Pulsar -> consumer
+../cleanup-integration.sh clients   # stop the clients, keep the platform
 ```
 
 Optional verification consumer (the pulsar-client stack is the real consumer):
