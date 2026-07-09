@@ -4,30 +4,32 @@ networks:
     name: experimental-maas-client-network
     external: true
 services:
-  openssl-keystore-utility:
-    image: ubuntu:latest
-    volumes:
-      - ../.ignore.identities/admin:/home/certs
-      - ./scripts:/scripts
-    environment:
-      VOLUME_PATH: /home/certs
-      P12_FILE: keystore.p12
-      P12_PASSWORD: changeme
-    command:
-      - /bin/bash
-      - /scripts/extract-pem.sh
-  openssl-truststore-utility:
-    image: ubuntu:latest
-    volumes:
-      - ../.ignore.identities/trust:/home/certs
-      - ./scripts:/scripts
-    environment:
-      VOLUME_PATH: /home/certs
-      P12_FILE: truststore.p12
-      P12_PASSWORD: changeme
-    command:
-      - /bin/bash
-      - /scripts/extract-pem.sh
+# PEM extraction is only needed when the client authenticates with certs — not while
+# platform authentication is disabled. Re-enable together with auth.
+#  openssl-keystore-utility:
+#    image: ubuntu:latest
+#    volumes:
+#      - ../.ignore.identities/admin:/home/certs
+#      - ./scripts:/scripts
+#    environment:
+#      VOLUME_PATH: /home/certs
+#      P12_FILE: keystore.p12
+#      P12_PASSWORD: changeme
+#    command:
+#      - /bin/bash
+#      - /scripts/extract-pem.sh
+#  openssl-truststore-utility:
+#    image: ubuntu:latest
+#    volumes:
+#      - ../.ignore.identities/trust:/home/certs
+#      - ./scripts:/scripts
+#    environment:
+#      VOLUME_PATH: /home/certs
+#      P12_FILE: truststore.p12
+#      P12_PASSWORD: changeme
+#    command:
+#      - /bin/bash
+#      - /scripts/extract-pem.sh
   consumer:
     image: p10530maasacr.azurecr.io/ing-maas-pulsar:${revision}
     container_name: maas-consumer
@@ -41,14 +43,15 @@ services:
       client_tlsTrustStorePath: ''
       client_useKeyStoreTls: false
       client_tlsAllowInsecureConnection: true
-    volumes:
-      - ../.ignore.identities/admin:/data/client
-      - ../.ignore.identities/trust:/data/trust
-    depends_on:
-      openssl-keystore-utility:
-        condition: service_completed_successfully
-      openssl-truststore-utility:
-        condition: service_completed_successfully
+# identities mounts + PEM utilities are only needed with cert auth (disabled)
+#    volumes:
+#      - ../.ignore.identities/admin:/data/client
+#      - ../.ignore.identities/trust:/data/trust
+#    depends_on:
+#      openssl-keystore-utility:
+#        condition: service_completed_successfully
+#      openssl-truststore-utility:
+#        condition: service_completed_successfully
     command:
       - bash
       - -c

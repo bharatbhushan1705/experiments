@@ -15,22 +15,24 @@ services:
       - ../.ignore.identities/proxy:/maas/identities/proxy
       - ../.ignore.identities/admin:/maas/identities/control-plane
       - ../.ignore.identities/trust:/maas/identities/trust
-  openssl-utility:
-    image: ubuntu:latest
-    container_name: utility
-    volumes:
-      - ../.ignore.identities/admin:/home/certs
-      - ./scripts:/scripts
-    environment:
-      VOLUME_PATH: /home/certs
-      P12_FILE: keystore.p12
-      P12_PASSWORD: changeme
-    command:
-      - /bin/bash
-      - /scripts/extract-pem.sh
-    depends_on:
-        identity:
-            condition: service_completed_successfully
+# PEM extraction is only needed when clients authenticate with certs — not while
+# authentication is disabled. Re-enable together with auth.
+#  openssl-utility:
+#    image: ubuntu:latest
+#    container_name: utility
+#    volumes:
+#      - ../.ignore.identities/admin:/home/certs
+#      - ./scripts:/scripts
+#    environment:
+#      VOLUME_PATH: /home/certs
+#      P12_FILE: keystore.p12
+#      P12_PASSWORD: changeme
+#    command:
+#      - /bin/bash
+#      - /scripts/extract-pem.sh
+#    depends_on:
+#        identity:
+#            condition: service_completed_successfully
   zookeeper:
     image: p10530maasacr.azurecr.io/ing-maas-pulsar-dev:${revision}
     container_name: pulsar-zookeeper
@@ -92,6 +94,8 @@ services:
       PULSAR_PREFIX_allowAutoSubscriptionCreation: "true"
       PULSAR_PREFIX_authorizationEnabled: "false"
       PULSAR_PREFIX_authenticationEnabled: "false"
+      # auth is disabled: do not demand a client certificate during the TLS handshake
+      PULSAR_PREFIX_tlsRequireTrustedClientCertOnConnect: "false"
       PULSAR_PREFIX_advertisedAddress: broker
       PULSAR_PREFIX_superUserRoles: spiffe://nonprod.ing.com/v1/P10530/global-dev/broker,spiffe://nonprod.ing.com/v1/P10530/global-dev/proxy,spiffe://nonprod.ing.com/v1/P10530/global-dev/control-plane,spiffe://nonprod.ing.com/v1/P10530/global-dev/client
     volumes:
@@ -122,6 +126,9 @@ services:
       PULSAR_PREFIX_brokerWebServiceURLTLS: ''
       PULSAR_PREFIX_brokerServiceURLTLS: ''
       PULSAR_PREFIX_authenticationEnabled: "false"
+      # auth is disabled: do not demand a client certificate during the TLS handshake
+      # (fixes TLSV1_ALERT_CERTIFICATE_REQUIRED for cert-less clients)
+      PULSAR_PREFIX_tlsRequireTrustedClientCertOnConnect: "false"
     volumes:
       - ../.ignore.identities/proxy:/data/proxy
       - ../.ignore.identities/trust:/data/trust
