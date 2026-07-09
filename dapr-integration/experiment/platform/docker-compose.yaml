@@ -145,7 +145,7 @@ services:
     ports:
       - "6650:6650"
       - "8080:8080"
-#      - "6651:6651"   # TLS (re-enable with auth)
+#      - "6651:6651"
 #      - "8081:8081"
     depends_on:
       identity:

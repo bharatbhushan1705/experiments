@@ -1,6 +1,4 @@
 # curl producer publishing to Pulsar through the Dapr sidecar.
-# Publishes endless bursts at maximum throughput; stop with 'docker compose down'.
-#
 # Env:
 #   DAPR_HTTP     dapr base URL          (default http://daprd:3500)
 #   TOPIC         bare topic name        (default topic)
