@@ -16,4 +16,4 @@ rm -rf "$(dirname "${PLATFORM_DIR}")/.ignore.identities"
 echo "[3] docker compose up -d --wait"
 docker compose up -d --wait --wait-timeout 300
 
-echo "Platform is up (proxy: pulsar://maas-proxy:6650, http://maas-proxy:8080)."
+echo "Platform is up..."

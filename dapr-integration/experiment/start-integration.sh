@@ -1,15 +1,11 @@
 #!/usr/bin/env bash
 # Start all components in sequence: platform -> pulsar-client -> dapr-sidecar -> cots-client,
-# then check messages flow. Each component that is already running is skipped.
-# To stop, use ./cleanup-integration.sh
 set -uo pipefail
 DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 cd "${DIR}"
 
 say() { printf '\n\033[1;36m== %s ==\033[0m\n' "$*"; }
 fail() { printf '\n\033[1;31mFAIL: %s\033[0m\n' "$*"; dump; exit 1; }
-# checks use plain grep, not -q: grep -q exits on first match, the writer dies on
-# the broken pipe and pipefail turns a successful match into a failure
 running() { docker ps --format '{{.Names}}' | grep "^$1\$" >/dev/null; }
 dump() {
   echo "--- daprd ---";    (cd dapr-sidecar && docker compose logs --tail=30 daprd 2>/dev/null | grep -iE "pulsar|component|error" | tail -15)
@@ -17,7 +13,7 @@ dump() {
   echo "--- consumer ---"; docker logs --tail=10 maas-consumer 2>/dev/null
 }
 
-say "1) platform"
+say "starting platform"
 if running pulsar-proxy; then
   echo "   already running, skipping"
 else
@@ -44,14 +40,14 @@ if [[ "$nsfound" != "true" ]]; then
 fi
 echo "   namespace ${NS} exists"
 
-say "2) pulsar-client (consumer)"
+say "starting pulsar-client (consumer)"
 if running maas-consumer; then
   echo "   already running, skipping"
 else
   ./pulsar-client/start.sh
 fi
 
-say "3) dapr-sidecar"
+say "starting dapr-sidecar"
 ./dapr-sidecar/start.sh
 ok=false
 for i in $(seq 1 24); do
@@ -61,10 +57,10 @@ done
 [[ "$ok" == "true" ]] || fail "daprd did not load the pulsar-pubsub component"
 echo "   component loaded"
 
-say "4) cots-client (producer)"
+say "starting cots-client (producer)"
 ./cots-client/start.sh
 
-say "5) check messages flow (pulsar-client consumer stats)"
+say "perform check on messages flow (pulsar-client consumer stats)"
 received=0
 for i in $(seq 1 12); do
   received=$(docker logs maas-consumer 2>&1 | grep -oE "Throughput received: +[0-9,]+ +msg" | tail -1 | grep -oE "[0-9,]+" | tr -d ',' || true)
@@ -76,5 +72,4 @@ done
 [[ "$received" -ge 1 ]] || fail "no messages seen by the pulsar-client consumer"
 
 printf '\n\033[1;32mPASS: cots-client -> daprd -> platform Pulsar -> pulsar-client consumer (%s messages)\033[0m\n' "$received"
-echo "Stop the clients, keep the platform:  ./cleanup-integration.sh clients"
-echo "Full teardown including the platform: ./cleanup-integration.sh"
+echo "Stop and cleanup ./cleanup-integration.sh"
