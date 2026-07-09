@@ -41,10 +41,12 @@ services:
     container_name: dapr-experiment-consumer
     profiles: ["consumer"]
     environment:
-      client_brokerServiceUrl: pulsar+ssl://maas-proxy:6651
-      client_tlsAllowInsecureConnection: "true"
-      client_tlsEnableHostnameVerification: "false"
-      client_useKeyStoreTls: "false"
+      client_brokerServiceUrl: pulsar://maas-proxy:6650
+      # TLS variants (re-enable with auth):
+#      client_brokerServiceUrl: pulsar+ssl://maas-proxy:6651
+#      client_tlsAllowInsecureConnection: "true"
+#      client_tlsEnableHostnameVerification: "false"
+#      client_useKeyStoreTls: "false"
       tenantName: "${TENANT:-tenant}"
       namespaceName: "${NAMESPACE:-namespace}"
       topicName: "${TOPIC:-topic}"

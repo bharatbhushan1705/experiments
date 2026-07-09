@@ -53,8 +53,9 @@ services:
     hostname: pulsar-init
     image: p10530maasacr.azurecr.io/ing-maas-pulsar-dev:${revision}
     container_name: pulsar-init
+    # TLS variant (re-enable with auth): --web-service-url https://broker:8081 --broker-service-url pulsar+ssl://broker:6651
     command: >
-      bin/pulsar initialize-cluster-metadata --cluster "${clusterName:-maas}" --zookeeper zookeeper:2181 --configuration-store zookeeper:2181 --web-service-url https://broker:8081 --broker-service-url pulsar+ssl://broker:6651
+      bin/pulsar initialize-cluster-metadata --cluster "${clusterName:-maas}" --zookeeper zookeeper:2181 --configuration-store zookeeper:2181 --web-service-url http://broker:8080 --broker-service-url pulsar://broker:6650
     depends_on:
       zookeeper:
         condition: service_healthy
@@ -94,16 +95,24 @@ services:
       PULSAR_PREFIX_allowAutoSubscriptionCreation: "true"
       PULSAR_PREFIX_authorizationEnabled: "false"
       PULSAR_PREFIX_authenticationEnabled: "false"
-      # auth is disabled: do not demand a client certificate during the TLS handshake
-      PULSAR_PREFIX_tlsRequireTrustedClientCertOnConnect: "false"
+      # auth is disabled -> run PLAIN listeners only; TLS listeners are switched off
+      # entirely (re-enable together with auth)
+      PULSAR_PREFIX_brokerServicePort: "6650"
+      PULSAR_PREFIX_webServicePort: "8080"
+      PULSAR_PREFIX_brokerServicePortTls: ''
+      PULSAR_PREFIX_webServicePortTls: ''
+      PULSAR_PREFIX_brokerClientTlsEnabled: "false"
+#      PULSAR_PREFIX_tlsRequireTrustedClientCertOnConnect: "false"   # moot without a TLS listener
       PULSAR_PREFIX_advertisedAddress: broker
       PULSAR_PREFIX_superUserRoles: spiffe://nonprod.ing.com/v1/P10530/global-dev/broker,spiffe://nonprod.ing.com/v1/P10530/global-dev/proxy,spiffe://nonprod.ing.com/v1/P10530/global-dev/control-plane,spiffe://nonprod.ing.com/v1/P10530/global-dev/client
     volumes:
       - ../.ignore.identities/broker:/data/broker
       - ../.ignore.identities/trust:/data/trust
     expose:
-      - "6651"
-      - "8081"
+      - "6650"
+      - "8080"
+#      - "6651"   # TLS (re-enable with auth)
+#      - "8081"
     healthcheck:
       test: [ "CMD", "curl", "-s", "http://localhost:8080/metrics" ]
       interval: 30s
@@ -126,16 +135,25 @@ services:
       PULSAR_PREFIX_brokerWebServiceURLTLS: ''
       PULSAR_PREFIX_brokerServiceURLTLS: ''
       PULSAR_PREFIX_authenticationEnabled: "false"
-      # auth is disabled: do not demand a client certificate during the TLS handshake
-      # (fixes TLSV1_ALERT_CERTIFICATE_REQUIRED for cert-less clients)
-      PULSAR_PREFIX_tlsRequireTrustedClientCertOnConnect: "false"
+      # auth is disabled -> plain proxy listeners + plain hop to the broker; TLS
+      # listeners switched off entirely (re-enable together with auth)
+      PULSAR_PREFIX_servicePort: "6650"
+      PULSAR_PREFIX_webServicePort: "8080"
+      PULSAR_PREFIX_servicePortTls: ''
+      PULSAR_PREFIX_webServicePortTls: ''
+      PULSAR_PREFIX_brokerServiceURL: pulsar://broker:6650
+      PULSAR_PREFIX_brokerWebServiceURL: http://broker:8080
+      PULSAR_PREFIX_tlsEnabledWithBroker: "false"
+#      PULSAR_PREFIX_tlsRequireTrustedClientCertOnConnect: "false"   # moot without a TLS listener
     volumes:
       - ../.ignore.identities/proxy:/data/proxy
       - ../.ignore.identities/trust:/data/trust
       - ../.ignore.identities/admin:/data/client
     ports:
-      - "6651:6651"
-      - "8081:8081"
+      - "6650:6650"
+      - "8080:8080"
+#      - "6651:6651"   # TLS (re-enable with auth)
+#      - "8081:8081"
     depends_on:
       identity:
         condition: service_completed_successfully
@@ -151,15 +169,18 @@ services:
     container_name: metadata-init
     environment:
       PULSAR_LOG_LEVEL: INFO
-      client_webServiceUrl: https://${clusterName:-maas}-proxy:8081
-      client_brokerServiceUrl: pulsar+ssl://${clusterName:-maas}-proxy:6651
-      client_tlsKeyStorePath: /data/client/keystore.p12
-      client_tlsTrustStorePath: /data/trust/truststore.p12
-      client_tlsKeyStorePassword: changeme
-      client_tlsTrustStorePassword: changeme
-      client_tlsTrustStoreType: PKCS12
-      client_tlsKeyStoreType: PKCS12
-      client_authParams: '{"keyStoreType":"PKCS12","keyStorePath":"/data/client/keystore.p12","keyStorePassword":"changeme"}'
+      client_webServiceUrl: http://${clusterName:-maas}-proxy:8080
+      client_brokerServiceUrl: pulsar://${clusterName:-maas}-proxy:6650
+      # TLS/keystore auth (re-enable with auth):
+#      client_webServiceUrl: https://${clusterName:-maas}-proxy:8081
+#      client_brokerServiceUrl: pulsar+ssl://${clusterName:-maas}-proxy:6651
+#      client_tlsKeyStorePath: /data/client/keystore.p12
+#      client_tlsTrustStorePath: /data/trust/truststore.p12
+#      client_tlsKeyStorePassword: changeme
+#      client_tlsTrustStorePassword: changeme
+#      client_tlsTrustStoreType: PKCS12
+#      client_tlsKeyStoreType: PKCS12
+#      client_authParams: '{"keyStoreType":"PKCS12","keyStorePath":"/data/client/keystore.p12","keyStorePassword":"changeme"}'
     volumes:
       - ../.ignore.identities/admin:/data/client
       - ../.ignore.identities/trust:/data/trust

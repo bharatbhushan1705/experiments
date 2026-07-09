@@ -13,12 +13,10 @@ spec:
   type: pubsub.pulsar
   version: v1
   metadata:
-    # The pulsar+ssl:// scheme gives TLS transport; enableTLS=false sets
-    # TLSAllowInsecureConnection=true (accept the platform's self-signed/SPIFFE server
-    # cert without verification) — the same posture as client.conf
-    # (tlsAllowInsecureConnection=true). No authentication is sent.
+    # Plain transport — the platform runs plain listeners while auth is disabled.
+    # TLS variant (re-enable with auth): host pulsar+ssl://maas-proxy:6651
     - name: host
-      value: "pulsar+ssl://maas-proxy:6651"
+      value: "pulsar://maas-proxy:6650"
     - name: enableTLS
       value: "false"
 

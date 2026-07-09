@@ -16,20 +16,23 @@ This stack is only the messaging middleware — `daprd` plus its component confi
     │  POST http://daprd:3500/v1.0/publish/pulsar-pubsub/topic   (bare topic name)
     ▼
  daprd 1.15.4  — BUILT-IN pubsub.pulsar   (conf/daprPubSub.yaml)
-    │  pulsar+ssl://maas-proxy:6651  = TLS transport, cert NOT verified, NO auth
+    │  pulsar://maas-proxy:6650  = plain transport, NO auth
     ▼
- platform Pulsar (authenticationEnabled=false)
+ platform Pulsar (authenticationEnabled=false, plain listeners)
     ──►  effective topic: persistent://tenant/namespace/topic
     ──►  (optional) profile-gated verification consumer
 ```
 
 The built-in component **builds the full topic name itself** from its `tenant`/
-`namespace` metadata, so producers publish with the **bare** name (`topic`). TLS
-semantics (verified against components-contrib source): the `pulsar+ssl://` scheme in
-`host` turns on TLS transport, and `enableTLS: false` sets
-`TLSAllowInsecureConnection=true` — the platform's self-signed/SPIFFE server cert is
-accepted unverified, the same posture as `client.conf`. (Transport TLS stays because
-the platform's listener is TLS; only *authentication* is disabled.)
+`namespace` metadata, so producers publish with the **bare** name (`topic`).
+
+Everything runs **plain** (`pulsar://6650`, `http://8080`): with auth and authz off,
+unverified TLS added no real security, and the platform image's TLS listener demanded
+client certificates at the handshake (`TLSV1_ALERT_CERTIFICATE_REQUIRED`) regardless
+of the auth setting. The TLS variants are kept as comments next to each setting —
+re-enable them together with authentication. (For reference, the built-in component
+does TLS transport via a `pulsar+ssl://` scheme in `host`; `enableTLS: false` then
+means unverified server certs.)
 
 ## Why authentication had to be disabled
 
