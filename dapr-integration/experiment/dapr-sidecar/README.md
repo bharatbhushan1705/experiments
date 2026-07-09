@@ -14,12 +14,12 @@ Pulsar**, with the client certificate configured in Dapr?
  pulsar-pluggable  (Go; pulsar.NewAuthenticationTLS(cert,key) → auth_method=tls)
     │  pulsar+ssl://maas-proxy:6651   ← REAL per-client mTLS auth, cert from Dapr config
     ▼
- platform Pulsar (mTLS)  ──►  consumer reads the topic back over mTLS
+ platform Pulsar (mTLS)  ──►  (optional) verification consumer, profile-gated
 ```
 
 Topic convention is the same as the pulsar-client stack:
-`persistent://tenant/namespace/custom-client-topic` (tenant/namespace/topic and the
-publish interval are configurable — see below).
+`persistent://tenant/namespace/topic` (tenant/namespace/topic and the publish interval
+are configurable — see below).
 
 ## Why a pluggable component (not stock daprd)
 
@@ -47,7 +47,7 @@ it, so the broker sees `principal=null` unless it accepts anonymous connections.
 |---|---|
 | [daprPubSub.yaml](daprPubSub.yaml) | The component: `pubsub.pulsar-pluggable`, cert paths, `serviceUrl`, tenant/namespace. |
 | [pluggable-component/](pluggable-component/) | The Go component (`main.go`) + `Dockerfile`. mTLS via `NewAuthenticationTLS`. Deps vendored → builds offline. |
-| [docker-compose.yaml](docker-compose.yaml) | cert utilities + pluggable + daprd + curl producer + consumer, on the platform network. |
+| [docker-compose.yaml](docker-compose.yaml) | cert utilities + pluggable + daprd + curl producer (+ optional profile-gated consumer), on the platform network. |
 | [start.sh](start.sh) | Checks identities → builds component → `docker compose up`. |
 | (cert extraction) | Reuses [../pulsar-client/scripts/extract-pem.sh](../pulsar-client/scripts/extract-pem.sh) via the same openssl utility containers as pulsar-client — extracts `cert.pem`/`privkey.key`/`fullchain.pem` in-place in `../.ignore.identities/`. |
 | [verify-local/](verify-local/) | Self-contained proof against a stock mTLS Pulsar (no platform needed). |
@@ -75,6 +75,13 @@ Clean up: `docker compose down -v`.
 ../platform/start.sh      # platform up first (generates ../.ignore.identities)
 ./start.sh
 docker compose logs -f producer   # PUBLISHED ...
+```
+
+The consumer is **not started by default** — the pulsar-client stack is the real
+consumer. To watch the experiment topic without touching pulsar-client, enable the
+optional profile-gated one:
+```bash
+docker compose --profile consumer up -d
 docker compose logs -f consumer   # got message ...
 ```
 
@@ -82,7 +89,7 @@ docker compose logs -f consumer   # got message ...
 
 | Var | Default | Meaning |
 |---|---|---|
-| `TENANT` / `NAMESPACE` / `TOPIC` | `tenant` / `namespace` / `custom-client-topic` | Full topic = `persistent://$TENANT/$NAMESPACE/$TOPIC` (producer and consumer both follow it) |
+| `TENANT` / `NAMESPACE` / `TOPIC` | `tenant` / `namespace` / `topic` | Full topic = `persistent://$TENANT/$NAMESPACE/$TOPIC` (producer and the optional consumer both follow it) |
 | `PUBLISH_INTERVAL` | `1` | Seconds between messages |
 | `P12_PASSWORD` | `changeme` | Platform keystore password |
 | `PLUGGABLE_IMAGE` | *(build locally)* | Prebuilt pluggable-component image to pull instead of building |
@@ -95,7 +102,7 @@ daprd's HTTP port is published on the host, so you can also publish ad hoc. The 
 must be URL-encoded (daprd's router collapses the `//` in `persistent://`):
 
 ```bash
-curl -X POST "http://localhost:3500/v1.0/publish/pulsar-pubsub/persistent%3A%2F%2Ftenant%2Fnamespace%2Fcustom-client-topic?metadata.rawPayload=true" \
+curl -X POST "http://localhost:3500/v1.0/publish/pulsar-pubsub/persistent%3A%2F%2Ftenant%2Fnamespace%2Ftopic?metadata.rawPayload=true" \
   -H 'Content-Type: application/json' -d '{"text":"hello from curl"}'
 ```
 (Unencoded topics still work — the component repairs the collapsed prefix — but

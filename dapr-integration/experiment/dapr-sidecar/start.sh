@@ -32,6 +32,8 @@ docker compose up -d
 
 echo
 echo "Done. Follow the flow with:"
-echo "  docker compose logs -f pulsar-pluggable # mTLS connection to Pulsar"
-echo "  docker compose logs -f custom-client    # producer: PUBLISHED ..."
-echo "  docker compose logs -f consumer         # consumer: got message ..."
+echo "  docker compose logs -f pulsar-pluggable   # mTLS connection to Pulsar"
+echo "  docker compose logs -f producer           # PUBLISHED ..."
+echo
+echo "Optional verification consumer (not started by default):"
+echo "  docker compose --profile consumer up -d && docker compose logs -f consumer"

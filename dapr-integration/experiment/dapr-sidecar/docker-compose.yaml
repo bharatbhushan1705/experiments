@@ -7,7 +7,7 @@
 #   consumer reads the topic back directly from the platform over mTLS.
 #
 # Topic convention is the same as the pulsar-client stack:
-#   persistent://${TENANT:-tenant}/${NAMESPACE:-namespace}/${TOPIC:-custom-client-topic}
+#   persistent://${TENANT:-tenant}/${NAMESPACE:-namespace}/${TOPIC:-topic}
 #
 # Certs: the SAME openssl utility containers the pulsar-client stack uses
 # (../pulsar-client/scripts/extract-pem.sh) extract PEMs in-place from the platform's
@@ -101,7 +101,7 @@ services:
       PUBSUB_NAME: "pulsar-pubsub"
       TENANT: "${TENANT:-tenant}"
       NAMESPACE: "${NAMESPACE:-namespace}"
-      TOPIC: "${TOPIC:-custom-client-topic}"
+      TOPIC: "${TOPIC:-topic}"
       INTERVAL: "${PUBLISH_INTERVAL:-1}"
     depends_on:
       daprd:
@@ -130,11 +130,13 @@ services:
           sleep "$${INTERVAL}"
         done
 
-  # reads the topic straight from the platform over mTLS — same config style and
-  # cert paths as the pulsar-client consumer
+  # OPTIONAL verification consumer — NOT started by default. The real consumer is the
+  # pulsar-client stack; this one exists only to watch the experiment topic without
+  # touching pulsar-client. Enable with:  docker compose --profile consumer up -d
   consumer:
     image: apachepulsar/pulsar:4.1.0
-    container_name: custom-client-consumer
+    container_name: dapr-experiment-consumer
+    profiles: ["consumer"]
     volumes:
       - ../.ignore.identities/admin:/data/client:ro
       - ../.ignore.identities/trust:/data/trust:ro
@@ -147,7 +149,7 @@ services:
       client_useKeyStoreTls: "false"
       tenantName: "${TENANT:-tenant}"
       namespaceName: "${NAMESPACE:-namespace}"
-      topicName: "${TOPIC:-custom-client-topic}"
+      topicName: "${TOPIC:-topic}"
     depends_on:
       openssl-keystore-utility:
         condition: service_completed_successfully

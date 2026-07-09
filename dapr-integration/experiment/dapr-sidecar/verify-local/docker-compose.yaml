@@ -77,7 +77,7 @@ services:
       PUBSUB_NAME: "pulsar-pubsub"
       TENANT: "public"
       NAMESPACE: "default"
-      TOPIC: "custom-client-topic"
+      TOPIC: "topic"
       INTERVAL: "1"
     depends_on:
       daprd:
@@ -121,7 +121,7 @@ services:
       - -c
       - |
         bin/apply-config-from-env-with-prefix.py client_ conf/client.conf && \
-        exec bin/pulsar-client consume persistent://public/default/custom-client-topic \
+        exec bin/pulsar-client consume persistent://public/default/topic \
           -s verify-sub -p Earliest -n 0
 
 volumes:
