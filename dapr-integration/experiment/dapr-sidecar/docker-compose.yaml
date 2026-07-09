@@ -1,5 +1,3 @@
-# Dapr sidecar (daprd) with the built-in Pulsar component (conf/daprPubSub.yaml).
-# Producer lives in ../cots-client. Optional consumer is profile-gated.
 name: pulsar-dapr
 
 networks:
@@ -25,24 +23,3 @@ services:
       - "debug"
     ports:
       - "3500:3500"
-
-  # verification consumer, not started by default:
-  #   docker compose --profile consumer up -d
-  consumer:
-    image: apachepulsar/pulsar:4.1.0
-    container_name: dapr-experiment-consumer
-    profiles: ["consumer"]
-    environment:
-      client_brokerServiceUrl: pulsar://maas-proxy:6650
-      # TLS variant (with auth): pulsar+ssl://maas-proxy:6651 + tls client settings
-      tenantName: "${TENANT:-tenant}"
-      namespaceName: "${NAMESPACE:-namespace}"
-      topicName: "${TOPIC:-topic}"
-    command:
-      - bash
-      - -c
-      - |
-        bin/apply-config-from-env-with-prefix.py client_ conf/client.conf && \
-        exec bin/pulsar-client consume "persistent://$${tenantName}/$${namespaceName}/$${topicName}" \
-          -s dapr-experiment-consumer -p Earliest -n 0
-    restart: unless-stopped

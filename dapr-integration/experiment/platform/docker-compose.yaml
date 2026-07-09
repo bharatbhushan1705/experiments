@@ -15,8 +15,6 @@ services:
       - ../.ignore.identities/proxy:/maas/identities/proxy
       - ../.ignore.identities/admin:/maas/identities/control-plane
       - ../.ignore.identities/trust:/maas/identities/trust
-# PEM extraction is only needed when clients authenticate with certs — not while
-# authentication is disabled. Re-enable together with auth.
 #  openssl-utility:
 #    image: ubuntu:latest
 #    container_name: utility
@@ -53,7 +51,6 @@ services:
     hostname: pulsar-init
     image: p10530maasacr.azurecr.io/ing-maas-pulsar-dev:${revision}
     container_name: pulsar-init
-    # TLS variant (re-enable with auth): --web-service-url https://broker:8081 --broker-service-url pulsar+ssl://broker:6651
     command: >
       bin/pulsar initialize-cluster-metadata --cluster "${clusterName:-maas}" --zookeeper zookeeper:2181 --configuration-store zookeeper:2181 --web-service-url http://broker:8080 --broker-service-url pulsar://broker:6650
     depends_on:
@@ -95,8 +92,6 @@ services:
       PULSAR_PREFIX_allowAutoSubscriptionCreation: "true"
       PULSAR_PREFIX_authorizationEnabled: "false"
       PULSAR_PREFIX_authenticationEnabled: "false"
-      # auth is disabled -> run PLAIN listeners only; TLS listeners are switched off
-      # entirely (re-enable together with auth)
       PULSAR_PREFIX_brokerServicePort: "6650"
       PULSAR_PREFIX_webServicePort: "8080"
       PULSAR_PREFIX_brokerServicePortTls: ''
@@ -111,7 +106,7 @@ services:
     expose:
       - "6650"
       - "8080"
-#      - "6651"   # TLS (re-enable with auth)
+#      - "6651"
 #      - "8081"
     healthcheck:
       test: [ "CMD", "curl", "-s", "http://localhost:8080/metrics" ]
@@ -135,8 +130,6 @@ services:
       PULSAR_PREFIX_brokerWebServiceURLTLS: ''
       PULSAR_PREFIX_brokerServiceURLTLS: ''
       PULSAR_PREFIX_authenticationEnabled: "false"
-      # auth is disabled -> plain proxy listeners + plain hop to the broker; TLS
-      # listeners switched off entirely (re-enable together with auth)
       PULSAR_PREFIX_servicePort: "6650"
       PULSAR_PREFIX_webServicePort: "8080"
       PULSAR_PREFIX_servicePortTls: ''
@@ -144,7 +137,7 @@ services:
       PULSAR_PREFIX_brokerServiceURL: pulsar://broker:6650
       PULSAR_PREFIX_brokerWebServiceURL: http://broker:8080
       PULSAR_PREFIX_tlsEnabledWithBroker: "false"
-#      PULSAR_PREFIX_tlsRequireTrustedClientCertOnConnect: "false"   # moot without a TLS listener
+#      PULSAR_PREFIX_tlsRequireTrustedClientCertOnConnect: "false"
     volumes:
       - ../.ignore.identities/proxy:/data/proxy
       - ../.ignore.identities/trust:/data/trust
@@ -171,7 +164,6 @@ services:
       PULSAR_LOG_LEVEL: INFO
       client_webServiceUrl: http://${clusterName:-maas}-proxy:8080
       client_brokerServiceUrl: pulsar://${clusterName:-maas}-proxy:6650
-      # the image's client.conf has baked keystore/auth defaults; blank them explicitly
       client_tlsKeyStorePath: ''
       client_tlsTrustStorePath: ''
       client_tlsKeyStorePassword: ''
