@@ -115,7 +115,7 @@ services:
   proxy:
     image: p10530maasacr.azurecr.io/ing-maas-pulsar-dev:${revision}
     container_name: pulsar-proxy
-    hostname: proxy
+    hostname: ${clusterName:-maas}-proxy
     environment:
       MODE: proxy
       PULSAR_LOG_LEVEL: INFO

@@ -9,7 +9,7 @@ CLIENT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -
 
 CURRENT_DIR=$(pwd)
 
-docker network create maas-multiple-proxies-experimental-network || true
+docker network create experimental-maas-client-network || true
 echo "[1] docker compose up -d"
 cd "${CLIENT_DIR}"
 docker compose up -d --wait --wait-timeout 300

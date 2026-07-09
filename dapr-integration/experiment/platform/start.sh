@@ -9,7 +9,7 @@ PLATFORM_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd
 
 CURRENT_DIR=$(pwd)
 
-docker network create maas-multiple-proxies-experimental-network || true
+docker network create maas-platform-experiment-network || true
 
 echo "[1] docker compose build --no-cache"
 cd "${PLATFORM_DIR}"

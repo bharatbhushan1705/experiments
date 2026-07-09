@@ -1,7 +1,7 @@
-name: experimental-clients-multiple-proxies
+name: experimental-maas-client
 networks:
   default:
-    name: maas-multiple-proxies-experimental-network
+    name: experimental-maas-client-network
     external: true
 services:
   openssl-keystore-utility:
@@ -29,12 +29,14 @@ services:
       - /bin/bash
       - /scripts/extract-pem.sh
   consumer:
-    image: apachepulsar/pulsar:4.1.0
-    container_name: ha-proxy-consumer
+    image: p10530maasacr.azurecr.io/ing-maas-pulsar:${revision}
+    container_name: maas-consumer
     environment:
       PULSAR_LOG_LEVEL: INFO
-      client_webServiceUrl: https://${clusterName:-maas}-haproxy:8081
-      client_brokerServiceUrl: pulsar+ssl://${clusterName:-maas}-haproxy:6651
+#      client_webServiceUrl: https://${clusterName:-maas}-proxy:8081
+#      client_brokerServiceUrl: pulsar+ssl://${clusterName:-maas}-proxy:6651
+      client_webServiceUrl: https://host.docker.internal:8081
+      client_brokerServiceUrl: pulsar+ssl://host.docker.internal:6651
       client_tlsKeyStorePath: ''
       client_tlsTrustStorePath: ''
       client_useKeyStoreTls: false
@@ -54,31 +56,31 @@ services:
       - -c
       - |
         bin/apply-config-from-env-with-prefix.py client_ conf/client.conf && \
-        bin/pulsar-perf consume persistent://${tenantName:-tenant}/${namespaceName:-namespace}/ha-proxy-topic -s subscription -time 0
-  producer:
-    image: apachepulsar/pulsar:4.1.0
-    container_name: ha-proxy-producer
-    environment:
-      PULSAR_LOG_LEVEL: INFO
-      client_webServiceUrl: https://${clusterName:-maas}-haproxy:8081
-      client_brokerServiceUrl: pulsar+ssl://${clusterName:-maas}-haproxy:6651
-      client_tlsKeyStorePath: ''
-      client_tlsTrustStorePath: ''
-      client_useKeyStoreTls: false
-      client_tlsAllowInsecureConnection: true
-      client_authPlugin: org.apache.pulsar.client.impl.auth.AuthenticationTls
-      client_authParams: 'tlsCertFile:/data/client/cert.pem,tlsKeyFile:/data/client/privkey.key'
-    volumes:
-      - ../.ignore.identities/admin:/data/client
-      - ../.ignore.identities/trust:/data/trust
-    depends_on:
-      openssl-keystore-utility:
-        condition: service_completed_successfully
-      openssl-truststore-utility:
-        condition: service_completed_successfully
-    command:
-      - bash
-      - -c
-      - |
-        bin/apply-config-from-env-with-prefix.py client_ conf/client.conf && \
-        bin/pulsar-perf produce persistent://${tenantName:-tenant}/${namespaceName:-namespace}/ha-proxy-topic -r 10 -time 0
+        bin/pulsar-perf consume persistent://${tenantName:-tenant}/${namespaceName:-namespace}/topic -s subscription -time 0
+#  producer:
+#    image: apachepulsar/pulsar:4.1.0
+#    container_name: ha-proxy-producer
+#    environment:
+#      PULSAR_LOG_LEVEL: INFO
+#      client_webServiceUrl: https://${clusterName:-maas}-haproxy:8081
+#      client_brokerServiceUrl: pulsar+ssl://${clusterName:-maas}-haproxy:6651
+#      client_tlsKeyStorePath: ''
+#      client_tlsTrustStorePath: ''
+#      client_useKeyStoreTls: false
+#      client_tlsAllowInsecureConnection: true
+#      client_authPlugin: org.apache.pulsar.client.impl.auth.AuthenticationTls
+#      client_authParams: 'tlsCertFile:/data/client/cert.pem,tlsKeyFile:/data/client/privkey.key'
+#    volumes:
+#      - ../.ignore.identities/admin:/data/client
+#      - ../.ignore.identities/trust:/data/trust
+#    depends_on:
+#      openssl-keystore-utility:
+#        condition: service_completed_successfully
+#      openssl-truststore-utility:
+#        condition: service_completed_successfully
+#    command:
+#      - bash
+#      - -c
+#      - |
+#        bin/apply-config-from-env-with-prefix.py client_ conf/client.conf && \
+#        bin/pulsar-perf produce persistent://${tenantName:-tenant}/${namespaceName:-namespace}/ha-proxy-topic -r 10 -time 0
