@@ -1,8 +1,8 @@
-# Self-contained verification of the PLUGGABLE-COMPONENT design (public images + the
-# component we build here — no private ACR image, no anonymousUserRole hack).
+# Self-contained verification of the pluggable-component design (public images + the
+# component built from ../pluggable-component — no private image, no broker tricks).
 #
 # Proves REAL per-client mTLS auth end to end:
-#   custom-client (Java, HTTPS self-signed)
+#   producer (curl loop)
 #     -> daprd (loads pubsub.pulsar-pluggable over UDS)
 #     -> pulsar-pluggable (our Go component; NewAuthenticationTLS -> auth_method=tls)
 #     -> Pulsar standalone that REQUIRES a trusted client cert AND authenticates it
@@ -22,16 +22,6 @@ services:
       OUT_DIR: /certs/pulsar
     command: ["/bin/bash", "/gen-test-certs.sh"]
 
-  app-cert-init:
-    image: ubuntu:latest
-    volumes:
-      - certs:/certs
-      - ../../custom-client/scripts/gen-app-cert.sh:/gen-app-cert.sh:ro
-    environment:
-      OUT_DIR: /certs
-      KEYSTORE_PASSWORD: changeme
-    command: ["/bin/bash", "/gen-app-cert.sh"]
-
   # stand-in for the mTLS platform: authentication ENABLED, no anonymous role.
   pulsar:
     image: apachepulsar/pulsar:4.1.0
@@ -48,13 +38,10 @@ services:
       start_period: 40s
 
   # our pluggable Pulsar component (real client-cert auth). Creates the UDS socket.
-  # Set PLUGGABLE_IMAGE=<your-acr>/pulsar-pluggable:<tag> to use your prebuilt image
-  # instead of building here (skips the Go build entirely).
   pulsar-pluggable:
     build: ../pluggable-component
     image: ${PLUGGABLE_IMAGE:-pulsar-pluggable:local}
     environment:
-      # Your image reads this to place its socket; daprd scans this folder by default.
       DAPR_COMPONENT_SOCKET_PATH: /tmp/dapr-components-sockets/pulsar-pluggable.sock
     volumes:
       - dapr-sockets:/tmp/dapr-components-sockets
@@ -73,13 +60,7 @@ services:
     command:
       - "./daprd"
       - "--app-id"
-      - "custom-client"
-      - "--app-protocol"
-      - "https"
-      - "--app-port"
-      - "8443"
-      - "--app-channel-address"
-      - "custom-client"
+      - "curl-producer"
       - "--dapr-http-port"
       - "3500"
       - "--resources-path"
@@ -87,25 +68,42 @@ services:
       - "--log-level"
       - "debug"
 
-  custom-client:
-    image: eclipse-temurin:21-jdk
-    hostname: custom-client
-    working_dir: /app
-    volumes:
-      - ../../custom-client/app:/app:ro
-      - certs:/certs:ro
+  # the producer: a curl loop posting to Dapr's publish API (standalone ships
+  # tenant "public" / namespace "default" out of the box)
+  producer:
+    image: curlimages/curl:latest
     environment:
       DAPR_HTTP: "http://daprd:3500"
       PUBSUB_NAME: "pulsar-pubsub"
-      # fully-qualified Pulsar topic, same convention as the pulsar-client stack;
-      # the pluggable component passes it through unchanged
-      TOPIC: "persistent://public/default/custom-client-topic"
-      APP_PORT: "8443"
-      KEYSTORE_PATH: "/certs/app-keystore.p12"
-      KEYSTORE_PASSWORD: "changeme"
-      PUBLISH_COUNT: "10"
-      PUBLISH_INTERVAL_MS: "500"
-    command: ["java", "CustomClient.java"]
+      TENANT: "public"
+      NAMESPACE: "default"
+      TOPIC: "custom-client-topic"
+      INTERVAL: "1"
+    depends_on:
+      daprd:
+        condition: service_started
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        FULL="persistent://$${TENANT}/$${NAMESPACE}/$${TOPIC}"
+        # URL-encode: daprd's router collapses a raw "//" in the path
+        ENC=$$(printf '%s' "$$FULL" | sed -e 's/:/%3A/g' -e 's|/|%2F|g')
+        until curl -fsS "$${DAPR_HTTP}/v1.0/healthz" >/dev/null 2>&1; do
+          echo "waiting for daprd..."; sleep 2
+        done
+        echo "publishing to $${FULL} every $${INTERVAL}s via $${DAPR_HTTP}"
+        i=0
+        while true; do
+          i=$$((i+1))
+          BODY="{\"id\":$$i,\"source\":\"curl-producer\",\"ts\":\"$$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"text\":\"hello from curl-producer #$$i\"}"
+          if curl -fsS -X POST -H "Content-Type: application/json" -d "$$BODY" \
+               "$${DAPR_HTTP}/v1.0/publish/$${PUBSUB_NAME}/$${ENC}?metadata.rawPayload=true" >/dev/null; then
+            echo "PUBLISHED $$BODY"
+          else
+            echo "PUBLISH FAILED (#$$i)"
+          fi
+          sleep "$${INTERVAL}"
+        done
 
   consumer:
     image: apachepulsar/pulsar:4.1.0

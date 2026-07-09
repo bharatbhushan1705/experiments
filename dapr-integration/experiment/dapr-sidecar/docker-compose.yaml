@@ -1,17 +1,19 @@
 # The Dapr side of the experiment, targeting the local platform cluster.
 #
-#   custom-client (Java, HTTPS self-signed)  [../custom-client/app]
+#   producer (curl loop)
 #     -> daprd  (loads pubsub.pulsar-pluggable from daprPubSub.yaml)
 #     -> pulsar-pluggable  (presents the client cert -> real mTLS auth to Pulsar)
 #     -> platform proxy (maas-proxy:6651)
 #   consumer reads the topic back directly from the platform over mTLS.
 #
+# Topic convention is the same as the pulsar-client stack:
+#   persistent://${TENANT:-tenant}/${NAMESPACE:-namespace}/${TOPIC:-custom-client-topic}
+#
 # Certs: the SAME openssl utility containers the pulsar-client stack uses
 # (../pulsar-client/scripts/extract-pem.sh) extract PEMs in-place from the platform's
 # PKCS12 identities (../.ignore.identities/{admin,trust}). The component and consumer
 # mount those folders directly — same paths and files as the pulsar-client consumer
-# (cert.pem / privkey.key / fullchain.pem). The app's self-signed HTTPS keystore is
-# generated separately into ./certs by app-cert-init.
+# (cert.pem / privkey.key / fullchain.pem).
 #
 # Verified end to end in ./verify-local. Bring this up with ./start.sh.
 name: pulsar-dapr
@@ -49,17 +51,6 @@ services:
       - /bin/bash
       - /scripts/extract-pem.sh
 
-  # ---- generates the app's self-signed HTTPS keystore into ./certs ----
-  app-cert-init:
-    image: ubuntu:latest
-    volumes:
-      - ./certs:/certs
-      - ../custom-client/scripts/gen-app-cert.sh:/gen-app-cert.sh:ro
-    environment:
-      OUT_DIR: /certs
-      KEYSTORE_PASSWORD: changeme
-    command: ["/bin/bash", "/gen-app-cert.sh"]
-
   # The pluggable Pulsar component (real client-cert mTLS auth to the platform).
   pulsar-pluggable:
     build: ./pluggable-component
@@ -86,13 +77,7 @@ services:
     command:
       - "./daprd"
       - "--app-id"
-      - "custom-client"
-      - "--app-protocol"
-      - "https"
-      - "--app-port"
-      - "8443"
-      - "--app-channel-address"
-      - "custom-client"
+      - "curl-producer"
       - "--dapr-http-port"
       - "3500"
       - "--resources-path"
@@ -100,38 +85,50 @@ services:
       - "--log-level"
       - "debug"
     ports:
-      - "3500:3500"
+      - "3500:3500"   # also lets you publish manually: see README
     depends_on:
       pulsar-pluggable:
         condition: service_healthy   # wait until the UDS socket exists
 
-  # the custom Java producer (source lives in ../custom-client/app)
-  custom-client:
-    image: eclipse-temurin:21-jdk
-    hostname: custom-client
-    working_dir: /app
-    volumes:
-      - ../custom-client/app:/app:ro
-      - ./certs:/certs:ro
+  # ---- the producer: a curl loop posting to Dapr's publish API ----
+  # Configurable via env (defaults match the pulsar-client conventions):
+  #   TENANT / NAMESPACE / TOPIC  -> persistent://tenant/namespace/custom-client-topic
+  #   PUBLISH_INTERVAL            -> seconds between messages (default 1)
+  producer:
+    image: curlimages/curl:latest
     environment:
       DAPR_HTTP: "http://daprd:3500"
       PUBSUB_NAME: "pulsar-pubsub"
-      # fully-qualified Pulsar topic, same convention as the pulsar-client stack;
-      # the app URL-encodes it and the pluggable component passes it through unchanged
-      TOPIC: "persistent://tenant/namespace/custom-client-topic"
-      APP_PORT: "8443"
-      KEYSTORE_PATH: "/certs/app-keystore.p12"
-      KEYSTORE_PASSWORD: "changeme"
-      PUBLISH_COUNT: "10"
-      PUBLISH_INTERVAL_MS: "1000"
-    ports:
-      - "8443:8443"
+      TENANT: "${TENANT:-tenant}"
+      NAMESPACE: "${NAMESPACE:-namespace}"
+      TOPIC: "${TOPIC:-custom-client-topic}"
+      INTERVAL: "${PUBLISH_INTERVAL:-1}"
     depends_on:
-      app-cert-init:
-        condition: service_completed_successfully
       daprd:
         condition: service_started
     restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        FULL="persistent://$${TENANT}/$${NAMESPACE}/$${TOPIC}"
+        # URL-encode: daprd's router collapses a raw "//" in the path
+        ENC=$$(printf '%s' "$$FULL" | sed -e 's/:/%3A/g' -e 's|/|%2F|g')
+        until curl -fsS "$${DAPR_HTTP}/v1.0/healthz" >/dev/null 2>&1; do
+          echo "waiting for daprd..."; sleep 2
+        done
+        echo "publishing to $${FULL} every $${INTERVAL}s via $${DAPR_HTTP}"
+        i=0
+        while true; do
+          i=$$((i+1))
+          BODY="{\"id\":$$i,\"source\":\"curl-producer\",\"ts\":\"$$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"text\":\"hello from curl-producer #$$i\"}"
+          if curl -fsS -X POST -H "Content-Type: application/json" -d "$$BODY" \
+               "$${DAPR_HTTP}/v1.0/publish/$${PUBSUB_NAME}/$${ENC}?metadata.rawPayload=true" >/dev/null; then
+            echo "PUBLISHED $$BODY"
+          else
+            echo "PUBLISH FAILED (#$$i)"
+          fi
+          sleep "$${INTERVAL}"
+        done
 
   # reads the topic straight from the platform over mTLS — same config style and
   # cert paths as the pulsar-client consumer
@@ -148,6 +145,9 @@ services:
       client_tlsAllowInsecureConnection: "true"
       client_tlsEnableHostnameVerification: "false"
       client_useKeyStoreTls: "false"
+      tenantName: "${TENANT:-tenant}"
+      namespaceName: "${NAMESPACE:-namespace}"
+      topicName: "${TOPIC:-custom-client-topic}"
     depends_on:
       openssl-keystore-utility:
         condition: service_completed_successfully
@@ -158,7 +158,7 @@ services:
       - -c
       - |
         bin/apply-config-from-env-with-prefix.py client_ conf/client.conf && \
-        exec bin/pulsar-client consume persistent://tenant/namespace/custom-client-topic \
+        exec bin/pulsar-client consume "persistent://$${tenantName}/$${namespaceName}/$${topicName}" \
           -s custom-client-consumer -p Earliest -n 0
     restart: unless-stopped
 

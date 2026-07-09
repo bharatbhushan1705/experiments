@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end verification of the pluggable-component design with REAL per-client mTLS
 # auth (no anonymousUserRole). Proves:
-#   custom-client(Java) -> daprd -> pulsar-pluggable(NewAuthenticationTLS) -> mTLS Pulsar
+#   producer(curl) -> daprd -> pulsar-pluggable(NewAuthenticationTLS) -> mTLS Pulsar
 #   -> consumer reads the messages back.
 set -uo pipefail
 cd "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -12,7 +12,7 @@ fail() { printf '\n\033[1;31mFAIL: %s\033[0m\n' "$*"; dump; exit 1; }
 dump() {
   echo "--- pulsar-pluggable ---"; $DC logs --tail=30 pulsar-pluggable 2>/dev/null
   echo "--- daprd ---";            $DC logs --tail=40 daprd 2>/dev/null | grep -iE "pluggable|pulsar|component|error|initialized" | tail -25
-  echo "--- custom-client ---";    $DC logs --tail=20 custom-client 2>/dev/null
+  echo "--- producer ---";         $DC logs --tail=20 producer 2>/dev/null
   echo "--- consumer ---";         $DC logs --tail=15 consumer 2>/dev/null
 }
 
@@ -27,9 +27,8 @@ else
   $DC build pulsar-pluggable || fail "component build failed (offline vendored build; see README if behind a proxy)"
 fi
 
-say "1) generate certs (Pulsar PKI + app keystore)"
+say "1) generate the throwaway Pulsar PKI"
 $DC up --exit-code-from certs-init certs-init || fail "cert generation failed"
-$DC up --exit-code-from app-cert-init app-cert-init || fail "app keystore generation failed"
 
 say "2) start Pulsar (mTLS, auth ENABLED, no anonymous role) and wait until healthy"
 $DC up -d pulsar
@@ -45,7 +44,7 @@ say "3) start consumer (subscribes @Earliest, auto-creates topic)"
 $DC up -d consumer
 sleep 8
 
-say "4) start the pluggable component (creates the UDS socket) and give it a moment"
+say "4) start the pluggable component (creates the UDS socket)"
 $DC up -d pulsar-pluggable
 sleep 6
 $DC ps pulsar-pluggable --format '{{.Name}} {{.State}}' | sed 's/^/   /'
@@ -61,30 +60,29 @@ for i in $(seq 1 24); do
   echo "   waiting for daprd init... (${i})"; sleep 3
 done
 [[ "$ok" == "true" ]] || echo "   (warn) couldn't confirm daprd init; continuing to publish anyway"
-# show the component actually loaded
 $DC logs daprd 2>/dev/null | grep -iE "pulsar-pubsub|pluggable|component loaded|Initialized" | tail -6 | sed 's/^/   /'
 
-say "6) start custom-client (publishes 10 messages via Dapr)"
-$DC up -d custom-client
+say "6) start the curl producer (publishes every 1s via Dapr)"
+$DC up -d producer
 
 say "7) wait for messages to flow, then assert"
 received=0
 for i in $(seq 1 30); do
-  received=$($DC logs consumer 2>/dev/null | grep -c "hello from custom-client" || true)
+  received=$($DC logs consumer 2>/dev/null | grep -c "hello from curl-producer" || true)
   echo "   consumer has seen ${received} message(s) (${i})"
-  [[ "$received" -ge 1 ]] && break
+  [[ "$received" -ge 3 ]] && break
   sleep 3
 done
 
-echo; echo "--- custom-client (producer) tail ---"
-$DC logs --tail=12 custom-client 2>/dev/null | grep -E "PUBLISHED|PUBLISH|HTTPS|Dapr ready" | sed 's/^/   /'
+echo; echo "--- producer tail ---"
+$DC logs --tail=8 producer 2>/dev/null | grep -E "PUBLISHED|PUBLISH|publishing" | sed 's/^/   /'
 echo "--- consumer tail ---"
 $DC logs --tail=6 consumer 2>/dev/null | grep -E "got message|content" | sed 's/^/   /'
 echo "--- pluggable component tail ---"
 $DC logs --tail=8 pulsar-pluggable 2>/dev/null | sed 's/^/   /'
 
 if [[ "$received" -ge 1 ]]; then
-  printf '\n\033[1;32mPASS: %s messages went custom-client -> Dapr -> pluggable(mTLS auth) -> Pulsar -> consumer\033[0m\n' "$received"
+  printf '\n\033[1;32mPASS: %s messages went producer(curl) -> Dapr -> pluggable(mTLS auth) -> Pulsar -> consumer\033[0m\n' "$received"
   echo "(no anonymousUserRole — the broker authenticated the client cert as a real role)"
   echo "(run '$DC down -v' to clean up)"
   exit 0

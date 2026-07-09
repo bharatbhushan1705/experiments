@@ -1,22 +1,25 @@
-# Dapr → mTLS Apache Pulsar (custom-client experiment)
+# Dapr → mTLS Apache Pulsar (pluggable component experiment)
 
-**Question:** can a custom app publish/consume through a **Dapr sidecar** to an
-**mTLS-secured Apache Pulsar**, with the client certificate configured in Dapr?
-**Answer: yes — but only with a *pluggable* Pulsar component.** This directory holds
-the Dapr side; the Java app lives in [../custom-client/](../custom-client/).
+**Question:** can an app publish through a **Dapr sidecar** to an **mTLS-secured Apache
+Pulsar**, with the client certificate configured in Dapr?
+**Answer: yes — but only with a *pluggable* Pulsar component.** Verified end to end.
 
 ```
- custom-client (Java, HTTPS self-signed)        ../custom-client/app/CustomClient.java
-    │  POST http://daprd:3500/v1.0/publish/pulsar-pubsub/custom-client-topic
+ producer (curl loop, 1 msg/s)
+    │  POST http://daprd:3500/v1.0/publish/pulsar-pubsub/<url-encoded full topic>
     ▼
  daprd 1.15.4  ──loads──►  pubsub.pulsar-pluggable   (daprPubSub.yaml)
     │  gRPC over unix socket /tmp/dapr-components-sockets/pulsar-pluggable.sock
     ▼
  pulsar-pluggable  (Go; pulsar.NewAuthenticationTLS(cert,key) → auth_method=tls)
-    │  pulsar+ssl://proxy:6651   ← REAL per-client mTLS auth, cert from Dapr config
+    │  pulsar+ssl://maas-proxy:6651   ← REAL per-client mTLS auth, cert from Dapr config
     ▼
  platform Pulsar (mTLS)  ──►  consumer reads the topic back over mTLS
 ```
+
+Topic convention is the same as the pulsar-client stack:
+`persistent://tenant/namespace/custom-client-topic` (tenant/namespace/topic and the
+publish interval are configurable — see below).
 
 ## Why a pluggable component (not stock daprd)
 
@@ -43,16 +46,16 @@ it, so the broker sees `principal=null` unless it accepts anonymous connections.
 | Path | What |
 |---|---|
 | [daprPubSub.yaml](daprPubSub.yaml) | The component: `pubsub.pulsar-pluggable`, cert paths, `serviceUrl`, tenant/namespace. |
-| [pluggable-component/](pluggable-component/) | The Go component (`main.go`) + `Dockerfile`. mTLS via `NewAuthenticationTLS`. |
-| [docker-compose.yaml](docker-compose.yaml) | daprd + pluggable + custom-client + consumer, on the platform network. |
+| [pluggable-component/](pluggable-component/) | The Go component (`main.go`) + `Dockerfile`. mTLS via `NewAuthenticationTLS`. Deps vendored → builds offline. |
+| [docker-compose.yaml](docker-compose.yaml) | cert utilities + pluggable + daprd + curl producer + consumer, on the platform network. |
+| [start.sh](start.sh) | Checks identities → builds component → `docker compose up`. |
 | (cert extraction) | Reuses [../pulsar-client/scripts/extract-pem.sh](../pulsar-client/scripts/extract-pem.sh) via the same openssl utility containers as pulsar-client — extracts `cert.pem`/`privkey.key`/`fullchain.pem` in-place in `../.ignore.identities/`. |
-| [start.sh](start.sh) | Prep certs → build component → `docker compose up`. |
 | [verify-local/](verify-local/) | Self-contained proof against a stock mTLS Pulsar (no platform needed). |
 
 ## Run it — self-contained proof (recommended first)
 
-No platform, no private image, no `anonymousUserRole`. Stands up a stock Pulsar with
-mandatory client-cert auth and drives the whole pipeline:
+No platform needed; stands up a stock Pulsar with mandatory client-cert auth and drives
+the whole pipeline:
 
 ```bash
 cd verify-local && ./verify.sh
@@ -61,33 +64,42 @@ Expected tail:
 ```
 Component loaded: pulsar-pubsub (pubsub.pulsar-pluggable/v1)
 pulsar-pluggable: Connection is ready ... pulsar+ssl://pulsar:6651
-custom-client: PUBLISHED {"id":1,...}     →     consumer: got message {"id":1,...}
-PASS: N messages went custom-client -> Dapr -> pluggable(mTLS auth) -> Pulsar -> consumer
+producer: PUBLISHED {"id":1,...}     →     consumer: got message {"id":1,...}
+PASS: N messages went producer(curl) -> Dapr -> pluggable(mTLS auth) -> Pulsar -> consumer
 ```
-This was verified end-to-end (real per-client cert auth, `authenticationEnabled=true`,
-no anonymous role). Clean up: `docker compose down -v`.
+Clean up: `docker compose down -v`.
 
 ## Run it — against the platform
 
 ```bash
-../platform/start.sh      # brings up the mTLS Pulsar cluster (needs the ING images)
-./start.sh                # extracts certs from ../.ignore.identities, builds, and starts
-docker compose logs -f custom-client   # PUBLISHED ...
-docker compose logs -f consumer        # got message ...
+../platform/start.sh      # platform up first (generates ../.ignore.identities)
+./start.sh
+docker compose logs -f producer   # PUBLISHED ...
+docker compose logs -f consumer   # got message ...
 ```
 
-## Swap in your own (ING) pluggable image
+### Configuration (env vars, all optional)
 
-The component here is an **open-source stand-in** with the same component type and the
-same metadata contract as your private `pulsar-pluggable`. To use yours, set an env var
-(no file edits, no Go build) — it works for both `start.sh` and `verify-local`:
+| Var | Default | Meaning |
+|---|---|---|
+| `TENANT` / `NAMESPACE` / `TOPIC` | `tenant` / `namespace` / `custom-client-topic` | Full topic = `persistent://$TENANT/$NAMESPACE/$TOPIC` (producer and consumer both follow it) |
+| `PUBLISH_INTERVAL` | `1` | Seconds between messages |
+| `P12_PASSWORD` | `changeme` | Platform keystore password |
+| `PLUGGABLE_IMAGE` | *(build locally)* | Prebuilt pluggable-component image to pull instead of building |
+
+Example: `TOPIC=orders PUBLISH_INTERVAL=5 ./start.sh`
+
+### Publish manually
+
+daprd's HTTP port is published on the host, so you can also publish ad hoc. The topic
+must be URL-encoded (daprd's router collapses the `//` in `persistent://`):
 
 ```bash
-export PLUGGABLE_IMAGE=p10530maasacr.azurecr.io/pulsar-pluggable:<tag>
-./start.sh                      # or:  cd verify-local && ./verify.sh
+curl -X POST "http://localhost:3500/v1.0/publish/pulsar-pubsub/persistent%3A%2F%2Ftenant%2Fnamespace%2Fcustom-client-topic?metadata.rawPayload=true" \
+  -H 'Content-Type: application/json' -d '{"text":"hello from curl"}'
 ```
-`daprPubSub.yaml` stays exactly the same — the cert is still configured in Dapr. Your
-image just needs to register its socket as `pulsar-pluggable.sock`.
+(Unencoded topics still work — the component repairs the collapsed prefix — but
+encoding is the correct form.)
 
 ## Troubleshooting the build
 
@@ -102,8 +114,13 @@ image just needs to register its socket as `pulsar-pluggable.sock`.
 
 ## Notes / assumptions
 
-- The component's Go dependencies are **vendored** (`pluggable-component/vendor/`) and the Dockerfile builds with `GOPROXY=off`, so the image builds **fully offline** — no Go module proxy needed (works behind a corporate firewall). To refresh deps where a proxy is reachable: `go mod vendor`. (Alternative: delete `vendor/`, remove `GOPROXY=off`/`GOFLAGS` from the Dockerfile, and set `GOPROXY` to your internal Artifactory.)
-- Java app runs from source via **JEP 330** (`java CustomClient.java`) on `eclipse-temurin:21-jdk` — no Dockerfile, no Maven.
-- `daprd` runs as root so it can reach the socket the component creates on the shared volume (default folder `/tmp/dapr-components-sockets`).
-- `tlsEnableHostnameVerification=false` + `tlsAllowInsecureConnection=true` in the component match the platform's `client.conf` posture (SPIFFE certs without DNS SANs). Tighten if your proxy cert has a matching DNS SAN.
-- The platform itself needs the ING images to generate SPIFFE identities; it can't run with stock `apachepulsar/pulsar` (which has no `MODE`/identity entrypoint). That's why verification uses a stock standalone with its own throwaway PKI.
+- The component's Go deps are **vendored** and the Dockerfile builds with `GOPROXY=off`,
+  so the image builds **fully offline** (works behind a corporate firewall).
+- `daprd` runs as root so it can reach the socket the component creates on the shared
+  volume (default folder `/tmp/dapr-components-sockets`).
+- `tlsEnableHostnameVerification=false` + `tlsAllowInsecureConnection=true` in
+  [daprPubSub.yaml](daprPubSub.yaml) match the platform's `client.conf` posture (SPIFFE
+  certs without DNS SANs). Tighten if your proxy cert has a matching DNS SAN.
+- To swap in a prebuilt (e.g. ACR) pluggable image: `PLUGGABLE_IMAGE=<image> ./start.sh`.
+  `daprPubSub.yaml` stays the same; the image must register its socket as
+  `pulsar-pluggable.sock`.
