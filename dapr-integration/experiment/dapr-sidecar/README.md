@@ -1,4 +1,4 @@
-# Dapr → Apache Pulsar (built-in component, authentication disabled)
+# Dapr sidecar → Apache Pulsar (built-in component, authentication disabled)
 
 > **Branch state:** this branch (`dapr-integration`) runs the platform with
 > **authentication disabled**, which lets Dapr's **built-in** Pulsar component work —
@@ -6,11 +6,16 @@
 > The full **mTLS** setup (client-cert auth via a custom pluggable component, verified
 > end-to-end) is preserved on branch **`experiment/dapr-pulsar-mtls`**.
 
+This stack is only the messaging middleware — `daprd` plus its component config in
+[conf/daprPubSub.yaml](conf/daprPubSub.yaml). The producer lives in
+[../cots-client/](../cots-client/); run the whole experiment at once with
+[../start-integration.sh](../start-integration.sh).
+
 ```
- producer (curl loop, 1 msg/s)
-    │  POST http://daprd:3500/v1.0/publish/pulsar-pubsub/topic     (bare topic name)
+ cots-client (curl)                        ../cots-client
+    │  POST http://daprd:3500/v1.0/publish/pulsar-pubsub/topic   (bare topic name)
     ▼
- daprd 1.15.4  — BUILT-IN pubsub.pulsar (daprPubSub.yaml)
+ daprd 1.15.4  — BUILT-IN pubsub.pulsar   (conf/daprPubSub.yaml)
     │  pulsar+ssl://maas-proxy:6651  = TLS transport, cert NOT verified, NO auth
     ▼
  platform Pulsar (authenticationEnabled=false)
@@ -19,11 +24,12 @@
 ```
 
 The built-in component **builds the full topic name itself** from its `tenant`/
-`namespace` metadata, so the producer publishes with the **bare** name (`topic`) —
-no URL-encoding needed. TLS semantics (verified against components-contrib source):
-the `pulsar+ssl://` scheme in `host` turns on TLS transport, and `enableTLS: false`
-sets `TLSAllowInsecureConnection=true`, i.e. the platform's self-signed/SPIFFE server
-cert is accepted unverified — the same posture as `client.conf`.
+`namespace` metadata, so producers publish with the **bare** name (`topic`). TLS
+semantics (verified against components-contrib source): the `pulsar+ssl://` scheme in
+`host` turns on TLS transport, and `enableTLS: false` sets
+`TLSAllowInsecureConnection=true` — the platform's self-signed/SPIFFE server cert is
+accepted unverified, the same posture as `client.conf`. (Transport TLS stays because
+the platform's listener is TLS; only *authentication* is disabled.)
 
 ## Why authentication had to be disabled
 
@@ -39,35 +45,26 @@ The real fix is ~30 lines in `dapr/components-contrib` (`pubsub/pulsar`): add
 metadata and wire them to `pulsar.NewAuthenticationTLS(cert, key)` +
 `ClientOptions.TLSTrustCertsFilePath` — the underlying `pulsar-client-go` already
 supports all of it. Once merged and released in daprd, the mTLS setup needs **only
-YAML**: re-enable platform auth and add the cert fields to [daprPubSub.yaml](daprPubSub.yaml)
-with `type: pubsub.pulsar`.
+YAML**: re-enable platform auth and add the cert fields to
+[conf/daprPubSub.yaml](conf/daprPubSub.yaml) with `type: pubsub.pulsar`.
 
 Branch `experiment/dapr-pulsar-mtls` contains a working, end-to-end-verified reference
-implementation of exactly that wiring (as a pluggable component) — the `Init()` code
-there translates almost 1:1 into the components-contrib patch.
+implementation of exactly that wiring (as a pluggable component) — its `Init()` code
+translates almost 1:1 into the components-contrib patch.
 
-## Files
-
-| Path | What |
-|---|---|
-| [daprPubSub.yaml](daprPubSub.yaml) | Built-in `pubsub.pulsar`: host (TLS transport), tenant/namespace. |
-| [docker-compose.yaml](docker-compose.yaml) | daprd + curl producer (+ optional profile-gated consumer). |
-| [start.sh](start.sh) | Network check + `docker compose up`. |
-| [verify-local/](verify-local/) | Self-contained proof against a stock TLS-no-auth Pulsar standalone. |
-
-## Run it — self-contained proof
+## Run
 
 ```bash
-cd verify-local && ./verify.sh
-# PASS: N messages went producer(curl) -> Dapr(built-in pubsub.pulsar) -> TLS Pulsar (no auth) -> consumer
+../platform/start.sh        # platform up first (authenticationEnabled=false)
+./start.sh                  # just daprd
+cd ../cots-client && docker compose up -d      # the producer
 ```
 
-## Run it — against the platform
+or everything at once, with an end-to-end assertion:
 
 ```bash
-../platform/start.sh      # platform up first (now with authenticationEnabled=false)
-./start.sh
-docker compose logs -f producer   # PUBLISHED ...
+../start-integration.sh     # PASS: N messages flowed cots-client -> daprd -> Pulsar -> consumer
+../start-integration.sh down
 ```
 
 Optional verification consumer (the pulsar-client stack is the real consumer):
@@ -80,8 +77,7 @@ docker compose --profile consumer up -d && docker compose logs -f consumer
 | Var | Default | Meaning |
 |---|---|---|
 | `TOPIC` | `topic` | Bare topic name; effective topic is `persistent://tenant/namespace/$TOPIC` |
-| `PUBLISH_INTERVAL` | `1` | Seconds between messages |
-| `TENANT` / `NAMESPACE` | `tenant` / `namespace` | Used by the optional consumer; the producer side's tenant/namespace live in [daprPubSub.yaml](daprPubSub.yaml) and must match |
+| `TENANT` / `NAMESPACE` | `tenant` / `namespace` | Used by the optional consumer; the producer side's tenant/namespace live in [conf/daprPubSub.yaml](conf/daprPubSub.yaml) and must match |
 
 ### Publish manually
 

@@ -1,15 +1,13 @@
-# The Dapr side of the experiment, targeting the local platform cluster
-# (authentication DISABLED on the platform — see daprPubSub.yaml for why that
-# allows the BUILT-IN Dapr Pulsar component with no pluggable container).
+# The Dapr sidecar for the experiment, targeting the local platform cluster
+# (authentication DISABLED on the platform — see conf/daprPubSub.yaml).
 #
-#   producer (curl loop)
-#     -> daprd  (built-in pubsub.pulsar from daprPubSub.yaml)
-#     -> platform proxy over TLS transport, no auth (pulsar+ssl://maas-proxy:6651)
-#   optional profile-gated consumer reads the topic back.
+# This stack is ONLY the messaging middleware:
+#   daprd (built-in pubsub.pulsar) -> platform proxy (pulsar+ssl://maas-proxy:6651)
 #
-# Effective topic: persistent://tenant/namespace/${TOPIC:-topic} — the built-in
-# component adds the tenant/namespace prefix (from daprPubSub.yaml), so the producer
-# publishes with the BARE topic name.
+# The producer lives in ../cots-client — any COTS app with HTTP/curl capability
+# publishes via daprd's API without knowing anything about Pulsar.
+# Effective topic: persistent://tenant/namespace/<bare-topic> (the built-in component
+# adds the tenant/namespace prefix from conf/daprPubSub.yaml).
 name: pulsar-dapr
 
 networks:
@@ -20,53 +18,21 @@ networks:
 services:
   daprd:
     image: daprio/daprd:1.15.4
+    container_name: daprd
     volumes:
-      - ./daprPubSub.yaml:/components/daprPubSub.yaml:ro
+      - ./conf:/conf:ro
     command:
       - "./daprd"
       - "--app-id"
-      - "curl-producer"
+      - "cots-client"
       - "--dapr-http-port"
       - "3500"
       - "--resources-path"
-      - "/components"
+      - "/conf"
       - "--log-level"
       - "debug"
     ports:
-      - "3500:3500"   # also lets you publish manually: see README
-
-  # ---- the producer: a curl loop posting to Dapr's publish API ----
-  # TOPIC is the BARE name (built-in component prefixes tenant/namespace itself).
-  producer:
-    image: curlimages/curl:latest
-    environment:
-      DAPR_HTTP: "http://daprd:3500"
-      PUBSUB_NAME: "pulsar-pubsub"
-      TOPIC: "${TOPIC:-topic}"
-      INTERVAL: "${PUBLISH_INTERVAL:-1}"
-    depends_on:
-      daprd:
-        condition: service_started
-    restart: unless-stopped
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        until curl -fsS "$${DAPR_HTTP}/v1.0/healthz" >/dev/null 2>&1; do
-          echo "waiting for daprd..."; sleep 2
-        done
-        echo "publishing to topic '$${TOPIC}' every $${INTERVAL}s via $${DAPR_HTTP} (component adds persistent://tenant/namespace/)"
-        i=0
-        while true; do
-          i=$$((i+1))
-          BODY="{\"id\":$$i,\"source\":\"curl-producer\",\"ts\":\"$$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"text\":\"hello from curl-producer #$$i\"}"
-          if curl -fsS -X POST -H "Content-Type: application/json" -d "$$BODY" \
-               "$${DAPR_HTTP}/v1.0/publish/$${PUBSUB_NAME}/$${TOPIC}?metadata.rawPayload=true" >/dev/null; then
-            echo "PUBLISHED $$BODY"
-          else
-            echo "PUBLISH FAILED (#$$i)"
-          fi
-          sleep "$${INTERVAL}"
-        done
+      - "3500:3500"   # publish from the host too: see README
 
   # OPTIONAL verification consumer — NOT started by default (the pulsar-client stack
   # is the real consumer). Enable with:  docker compose --profile consumer up -d

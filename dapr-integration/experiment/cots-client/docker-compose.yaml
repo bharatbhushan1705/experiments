@@ -1,0 +1,61 @@
+# COTS client showcase: ANY off-the-shelf application that can make HTTP calls (here:
+# plain curl) integrates with Apache Pulsar through the Dapr sidecar — no Pulsar SDK,
+# no TLS material, no broker addresses in the app. It only knows Dapr's publish URL.
+#
+# Start the dapr-sidecar stack first (../dapr-sidecar/start.sh), then:
+#   docker compose up -d
+#
+# Configuration (env):
+#   DAPR_HTTP    Dapr sidecar base URL          (default http://daprd:3500)
+#   TOPIC        bare topic name                (default topic; component adds
+#                                                persistent://tenant/namespace/)
+#   INTERVAL     seconds between messages, 0 = as fast as possible   (default 1)
+#   CONCURRENCY  parallel publisher loops       (default 1)
+#   COUNT        messages per loop, 0 = endless (default 0)
+#   LOG_EVERY    log every Nth publish          (default 1; raise for burst runs)
+#
+# Example — modest burst: INTERVAL=0 CONCURRENCY=4 LOG_EVERY=200 docker compose up -d
+name: cots-client
+
+networks:
+  default:
+    name: maas-platform-experiment-network
+    external: true
+
+services:
+  producer:
+    image: curlimages/curl:latest
+    environment:
+      DAPR_HTTP: "${DAPR_HTTP:-http://daprd:3500}"
+      PUBSUB_NAME: "${PUBSUB_NAME:-pulsar-pubsub}"
+      TOPIC: "${TOPIC:-topic}"
+      INTERVAL: "${INTERVAL:-1}"
+      CONCURRENCY: "${CONCURRENCY:-1}"
+      COUNT: "${COUNT:-0}"
+      LOG_EVERY: "${LOG_EVERY:-1}"
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until curl -fsS "$${DAPR_HTTP}/v1.0/healthz" >/dev/null 2>&1; do
+          echo "waiting for daprd at $${DAPR_HTTP}..."; sleep 2
+        done
+        echo "publishing to topic '$${TOPIC}' via $${DAPR_HTTP} (interval=$${INTERVAL}s, concurrency=$${CONCURRENCY})"
+        worker() {
+          w=$$1; i=0
+          while [ "$${COUNT}" -eq 0 ] || [ "$$i" -lt "$${COUNT}" ]; do
+            i=$$((i+1))
+            BODY="{\"id\":\"$$w-$$i\",\"source\":\"cots-client\",\"ts\":\"$$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"text\":\"hello from cots-client $$w-$$i\"}"
+            if curl -fsS -X POST -H "Content-Type: application/json" -d "$$BODY" \
+                 "$${DAPR_HTTP}/v1.0/publish/$${PUBSUB_NAME}/$${TOPIC}?metadata.rawPayload=true" >/dev/null; then
+              [ $$((i % LOG_EVERY)) -eq 0 ] && echo "PUBLISHED $$BODY"
+            else
+              echo "PUBLISH FAILED ($$w-$$i)"
+            fi
+            [ "$${INTERVAL}" != "0" ] && sleep "$${INTERVAL}"
+          done
+          echo "worker $$w done ($$i messages)"
+        }
+        w=1
+        while [ "$$w" -le "$${CONCURRENCY}" ]; do worker "$$w" & w=$$((w+1)); done
+        wait
