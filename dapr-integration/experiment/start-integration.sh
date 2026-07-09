@@ -85,3 +85,4 @@ done
 
 printf '\n\033[1;32mPASS: cots-client -> daprd -> platform Pulsar -> pulsar-client consumer (%s messages)\033[0m\n' "$received"
 echo "Stop everything except the platform:  ./start-integration.sh down"
+echo "Full teardown including the platform: ./cleanup-integration.sh"
