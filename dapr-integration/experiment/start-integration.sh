@@ -10,7 +10,9 @@ cd "${DIR}"
 
 say() { printf '\n\033[1;36m== %s ==\033[0m\n' "$*"; }
 fail() { printf '\n\033[1;31mFAIL: %s\033[0m\n' "$*"; dump; exit 1; }
-running() { docker ps --format '{{.Names}}' | grep -q "^$1\$"; }
+# checks use plain grep, not -q: grep -q exits on first match, the writer dies on
+# the broken pipe and pipefail turns a successful match into a failure
+running() { docker ps --format '{{.Names}}' | grep "^$1\$" >/dev/null; }
 dump() {
   echo "--- daprd ---";    (cd dapr-sidecar && docker compose logs --tail=30 daprd 2>/dev/null | grep -iE "pulsar|component|error" | tail -15)
   echo "--- producer ---"; (cd cots-client && docker compose logs --tail=10 producer 2>/dev/null)
@@ -41,7 +43,7 @@ NS="${TENANT:-tenant}/${NAMESPACE:-namespace}"
 nsfound=false
 for i in $(seq 1 12); do
   if docker run --rm --network maas-platform-experiment-network curlimages/curl:latest \
-       -fsS "http://maas-proxy:8080/admin/v2/namespaces/${TENANT:-tenant}" 2>/dev/null | grep -q "${NS}"; then
+       -fsS "http://maas-proxy:8080/admin/v2/namespaces/${TENANT:-tenant}" 2>/dev/null | grep "${NS}" >/dev/null; then
     nsfound=true; break
   fi
   echo "   waiting for namespace ${NS}... (${i})"; sleep 5
@@ -63,7 +65,7 @@ say "3) dapr-sidecar"
 ./dapr-sidecar/start.sh
 ok=false
 for i in $(seq 1 24); do
-  if (cd dapr-sidecar && docker compose logs daprd 2>/dev/null) | grep -q "Component loaded: pulsar-pubsub"; then ok=true; break; fi
+  if (cd dapr-sidecar && docker compose logs daprd 2>/dev/null) | grep "Component loaded: pulsar-pubsub" >/dev/null; then ok=true; break; fi
   echo "   waiting for daprd... (${i})"; sleep 3
 done
 [[ "$ok" == "true" ]] || fail "daprd did not load the pulsar-pubsub component"
