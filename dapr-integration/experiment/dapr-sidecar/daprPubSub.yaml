@@ -9,10 +9,10 @@ spec:
   type: pubsub.pulsar-pluggable
   version: v1
   metadata:
-    # Local platform proxy (docker network). For the external cluster this was
-    # pulsar+ssl://dcr-tst-infra.maas.ing.net:6651
+    # Local platform proxy (hostname ${clusterName:-maas}-proxy on the shared docker
+    # network). For the external cluster this was pulsar+ssl://dcr-tst-infra.maas.ing.net:6651
     - name: serviceUrl
-      value: "pulsar+ssl://proxy:6651"
+      value: "pulsar+ssl://maas-proxy:6651"
 
     # ================= Client identity (mTLS) — cert configured HERE, in Dapr config =====
     # The pluggable component calls pulsar.NewAuthenticationTLS(tlsCertFile, tlsKeyFile),

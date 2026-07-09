@@ -6,7 +6,7 @@ set -euo pipefail
 DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
 cd "${DIR}"
 
-NETWORK="maas-multiple-proxies-experimental-network"
+NETWORK="maas-platform-experiment-network"
 IDENTITIES_DIR="${IDENTITIES_DIR:-$(dirname "${DIR}")/.ignore.identities}"
 P12_PASSWORD="${P12_PASSWORD:-changeme}"
 

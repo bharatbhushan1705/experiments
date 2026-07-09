@@ -16,7 +16,7 @@ name: pulsar-dapr
 
 networks:
   default:
-    name: maas-multiple-proxies-experimental-network
+    name: maas-platform-experiment-network
     external: true
 
 services:
@@ -104,7 +104,7 @@ services:
     volumes:
       - ./certs:/certs:ro
     environment:
-      client_brokerServiceUrl: pulsar+ssl://proxy:6651
+      client_brokerServiceUrl: pulsar+ssl://maas-proxy:6651
       client_authPlugin: org.apache.pulsar.client.impl.auth.AuthenticationTls
       client_authParams: tlsCertFile:/certs/client.crt,tlsKeyFile:/certs/client.key
       client_tlsAllowInsecureConnection: "true"
