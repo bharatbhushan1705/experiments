@@ -23,6 +23,10 @@ services:
       BURST: "${BURST:-1000}"
       PARALLEL_MAX: "${PARALLEL_MAX:-50}"
     restart: unless-stopped
+    # bursts churn ~50 new connections each; reuse TIME_WAIT sockets so the
+    # ephemeral port range does not run out at high rates
+    sysctls:
+      net.ipv4.tcp_tw_reuse: "1"
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -36,11 +40,12 @@ services:
         while :; do
           b=$$((b+1))
           BODY="{\"burst\":$$b,\"source\":\"cots-client\",\"text\":\"hello from cots-client burst $$b\"}"
-          if curl -fsS -Z --parallel-max "$${PARALLEL_MAX}" --parallel-immediate -X POST \
-               -H "Content-Type: application/json" -d "$$BODY" --config /tmp/urls.cfg >/dev/null 2>&1; then
+          if ERR=$$(curl -fsS -Z --parallel-max "$${PARALLEL_MAX}" --parallel-immediate -X POST \
+               -H "Content-Type: application/json" -d "$$BODY" --config /tmp/urls.cfg 2>&1 >/dev/null); then
             E=$$(date +%s); D=$$((E-S)); [ "$$D" -eq 0 ] && D=1
             echo "burst $$b: $$((b*BURST)) msgs total, ~$$((b*BURST/D)) msg/s"
           else
-            echo "burst $$b: FAILED"; sleep 1
+            echo "burst $$b: FAILED ($$(echo "$$ERR" | grep -c .) of $${BURST} requests, first: $$(echo "$$ERR" | head -1))"
+            sleep 1
           fi
         done
