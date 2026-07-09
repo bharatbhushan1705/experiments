@@ -3,8 +3,6 @@ kind: Component
 metadata:
   name: pulsar-pubsub
 spec:
-  # Built-in Dapr Pulsar component. Works while platform auth is disabled;
-  # it has no client-cert fields (mTLS setup: branch experiment/dapr-pulsar-mtls).
   type: pubsub.pulsar
   version: v1
   metadata:

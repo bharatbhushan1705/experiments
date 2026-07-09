@@ -7,4 +7,4 @@ cd "${DIR}"
 
 docker compose down --remove-orphans
 
-echo "cots-client stopped."
+echo "cots-client stopped..."

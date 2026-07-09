@@ -20,7 +20,6 @@ This stack is only the messaging middleware — `daprd` plus its component confi
     ▼
  platform Pulsar (authenticationEnabled=false, plain listeners)
     ──►  effective topic: persistent://tenant/namespace/topic
-    ──►  (optional) profile-gated verification consumer
 ```
 
 The built-in component **builds the full topic name itself** from its `tenant`/
@@ -69,18 +68,6 @@ or everything at once, with an end-to-end assertion:
 ../start-integration.sh             # PASS: N messages flowed cots-client -> daprd -> Pulsar -> consumer
 ../cleanup-integration.sh clients   # stop the clients, keep the platform
 ```
-
-Optional verification consumer (the pulsar-client stack is the real consumer):
-```bash
-docker compose --profile consumer up -d && docker compose logs -f consumer
-```
-
-### Configuration (env vars, all optional)
-
-| Var | Default | Meaning |
-|---|---|---|
-| `TOPIC` | `topic` | Bare topic name; effective topic is `persistent://tenant/namespace/$TOPIC` |
-| `TENANT` / `NAMESPACE` | `tenant` / `namespace` | Used by the optional consumer; the producer side's tenant/namespace live in [conf/daprPubSub.yaml](conf/daprPubSub.yaml) and must match |
 
 ### Publish manually
 
