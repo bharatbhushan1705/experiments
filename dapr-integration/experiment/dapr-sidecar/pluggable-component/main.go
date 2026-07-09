@@ -178,6 +178,15 @@ func (p *PulsarPubSub) producerFor(rawTopic string) (pulsar.Producer, error) {
 // persistent://<tenant>/<namespace>/<topic>. A name that is already fully
 // qualified (persistent:// or non-persistent://) is passed through unchanged.
 func (p *PulsarPubSub) fullTopic(topic string) string {
+	// daprd's HTTP router collapses "//" in the request path, so an unencoded
+	// fully-qualified name can arrive as "persistent:/tenant/ns/topic" — repair it.
+	for _, scheme := range []string{"persistent", "non-persistent"} {
+		single := scheme + ":/"
+		if strings.HasPrefix(topic, single) && !strings.HasPrefix(topic, scheme+"://") {
+			topic = scheme + "://" + topic[len(single):]
+			break
+		}
+	}
 	if strings.HasPrefix(topic, "persistent://") || strings.HasPrefix(topic, "non-persistent://") {
 		return topic
 	}

@@ -115,7 +115,10 @@ public class CustomClient {
 
     /** POST the given JSON body to Dapr's publish API. Returns true on 2xx. */
     static boolean publish(String jsonBody) {
-        String url = DAPR_HTTP + "/v1.0/publish/" + PUBSUB_NAME + "/" + TOPIC
+        // URL-encode the topic: fully-qualified Pulsar names (persistent://t/ns/topic)
+        // contain "//" which daprd's router would otherwise collapse to "/".
+        String encodedTopic = java.net.URLEncoder.encode(TOPIC, StandardCharsets.UTF_8);
+        String url = DAPR_HTTP + "/v1.0/publish/" + PUBSUB_NAME + "/" + encodedTopic
                 + (RAW_PAYLOAD ? "?metadata.rawPayload=true" : "");
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(url))

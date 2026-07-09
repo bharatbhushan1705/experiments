@@ -116,7 +116,9 @@ services:
     environment:
       DAPR_HTTP: "http://daprd:3500"
       PUBSUB_NAME: "pulsar-pubsub"
-      TOPIC: "custom-client-topic"
+      # fully-qualified Pulsar topic, same convention as the pulsar-client stack;
+      # the app URL-encodes it and the pluggable component passes it through unchanged
+      TOPIC: "persistent://tenant/namespace/custom-client-topic"
       APP_PORT: "8443"
       KEYSTORE_PATH: "/certs/app-keystore.p12"
       KEYSTORE_PASSWORD: "changeme"

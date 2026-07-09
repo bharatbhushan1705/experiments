@@ -33,8 +33,9 @@ spec:
       value: "true"
 
     # ================= Topic addressing =================
-    # persistent://<tenant>/<namespace>/<topic>. Must match what metadata-init created
-    # on the platform (${tenantName:-tenant}/${namespaceName:-namespace}).
+    # Fully-qualified topic names (persistent://tenant/namespace/topic) are passed
+    # through unchanged — that is what the custom-client sends. tenant/namespace below
+    # are ONLY used as the prefix for bare topic names.
     - name: tenant
       value: "tenant"
     - name: namespace
