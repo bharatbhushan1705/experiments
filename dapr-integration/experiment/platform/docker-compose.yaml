@@ -171,7 +171,15 @@ services:
       PULSAR_LOG_LEVEL: INFO
       client_webServiceUrl: http://${clusterName:-maas}-proxy:8080
       client_brokerServiceUrl: pulsar://${clusterName:-maas}-proxy:6650
-      # TLS/keystore auth (re-enable with auth):
+      # the image's client.conf has baked keystore/auth defaults; blank them explicitly
+      client_tlsKeyStorePath: ''
+      client_tlsTrustStorePath: ''
+      client_tlsKeyStorePassword: ''
+      client_tlsTrustStorePassword: ''
+      client_useKeyStoreTls: 'false'
+      client_authPlugin: ''
+      client_authParams: ''
+      # TLS/keystore variant (re-enable with auth):
 #      client_webServiceUrl: https://${clusterName:-maas}-proxy:8081
 #      client_brokerServiceUrl: pulsar+ssl://${clusterName:-maas}-proxy:6651
 #      client_tlsKeyStorePath: /data/client/keystore.p12

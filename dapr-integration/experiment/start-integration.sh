@@ -37,6 +37,21 @@ for i in $(seq 1 30); do
 done
 docker exec pulsar-proxy bash -c 'exec 3<>/dev/tcp/localhost/6650' 2>/dev/null || fail "platform proxy not reachable on 6650"
 
+NS="${TENANT:-tenant}/${NAMESPACE:-namespace}"
+nsfound=false
+for i in $(seq 1 12); do
+  if docker run --rm --network maas-platform-experiment-network curlimages/curl:latest \
+       -fsS "http://maas-proxy:8080/admin/v2/namespaces/${TENANT:-tenant}" 2>/dev/null | grep -q "${NS}"; then
+    nsfound=true; break
+  fi
+  echo "   waiting for namespace ${NS}... (${i})"; sleep 5
+done
+if [[ "$nsfound" != "true" ]]; then
+  echo "   metadata-init did not create ${NS}. Check: docker logs metadata-init" >&2
+  fail "namespace ${NS} not found on the cluster"
+fi
+echo "   namespace ${NS} exists"
+
 say "2) pulsar-client (consumer)"
 if running maas-consumer; then
   echo "   already running, skipping"

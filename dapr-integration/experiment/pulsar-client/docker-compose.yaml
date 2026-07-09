@@ -37,12 +37,15 @@ services:
       PULSAR_LOG_LEVEL: INFO
       client_webServiceUrl: http://host.docker.internal:8080
       client_brokerServiceUrl: pulsar://host.docker.internal:6650
-      # TLS variants (re-enable with auth):
+      # the image's client.conf has baked keystore/auth defaults; blank them explicitly
+      client_tlsKeyStorePath: ''
+      client_tlsTrustStorePath: ''
+      client_useKeyStoreTls: 'false'
+      client_authPlugin: ''
+      client_authParams: ''
+      # TLS variant (re-enable with auth):
 #      client_webServiceUrl: https://host.docker.internal:8081
 #      client_brokerServiceUrl: pulsar+ssl://host.docker.internal:6651
-#      client_tlsKeyStorePath: ''
-#      client_tlsTrustStorePath: ''
-#      client_useKeyStoreTls: false
 #      client_tlsAllowInsecureConnection: true
 # identities mounts + PEM utilities are only needed with cert auth (disabled)
 #    volumes:
