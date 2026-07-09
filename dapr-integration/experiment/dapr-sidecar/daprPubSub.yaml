@@ -1,53 +1,34 @@
 apiVersion: dapr.io/v1alpha1
 kind: Component
 metadata:
-  # The pub/sub name the app publishes to: POST /v1.0/publish/pulsar-pubsub/<topic>
+  # The pub/sub name the producer publishes to: POST /v1.0/publish/pulsar-pubsub/<topic>
   name: pulsar-pubsub
 spec:
-  # Served by the pluggable component over the UDS socket "pulsar-pluggable.sock".
-  # (Swap the pluggable-component image for your ACR build; this YAML stays the same.)
-  type: pubsub.pulsar-pluggable
+  # Dapr's BUILT-IN Pulsar component — no pluggable component, no extra container.
+  # This works ONLY because the platform has authentication DISABLED: the built-in
+  # component cannot present a client certificate (no tlsCertFile/tlsKeyFile fields).
+  # The mTLS-capable pluggable-component setup is preserved on branch
+  # experiment/dapr-pulsar-mtls; the plan is to contribute client-cert mTLS upstream
+  # to dapr/components-contrib so this built-in component can do it natively.
+  type: pubsub.pulsar
   version: v1
   metadata:
-    # Local platform proxy (hostname ${clusterName:-maas}-proxy on the shared docker
-    # network). For the external cluster this was pulsar+ssl://dcr-tst-infra.maas.ing.net:6651
-    - name: serviceUrl
+    # The pulsar+ssl:// scheme gives TLS transport; enableTLS=false sets
+    # TLSAllowInsecureConnection=true (accept the platform's self-signed/SPIFFE server
+    # cert without verification) — the same posture as client.conf
+    # (tlsAllowInsecureConnection=true). No authentication is sent.
+    - name: host
       value: "pulsar+ssl://maas-proxy:6651"
-
-    # ================= Client identity (mTLS) — cert configured HERE, in Dapr config =====
-    # The pluggable component calls pulsar.NewAuthenticationTLS(tlsCertFile, tlsKeyFile),
-    # so Dapr authenticates to Pulsar as a real per-client role (auth_method=tls).
-    # Files are the PEMs the openssl utility (pulsar-client/scripts/extract-pem.sh)
-    # extracts in-place from the platform identities — same paths the pulsar-client
-    # consumer uses. Key MUST be PKCS#8 PEM (extract-pem.sh emits PKCS#8).
-    - name: tlsCertFile
-      value: "/data/client/cert.pem"
-    - name: tlsKeyFile
-      value: "/data/client/privkey.key"
-    - name: tlsTrustCertsFilePath
-      value: "/data/trust/fullchain.pem"
-    # Platform SPIFFE certs have no DNS SAN for "proxy"; match client.conf's posture.
-    - name: tlsEnableHostnameVerification
+    - name: enableTLS
       value: "false"
-    - name: tlsAllowInsecureConnection
-      value: "true"
 
-    # ================= Topic addressing =================
-    # Fully-qualified topic names (persistent://tenant/namespace/topic) are passed
-    # through unchanged — that is what the custom-client sends. tenant/namespace below
-    # are ONLY used as the prefix for bare topic names.
+    # The built-in component ALWAYS builds the full topic name itself:
+    # persistent://<tenant>/<namespace>/<topic-from-publish-URL>.
+    # So the producer publishes with the BARE topic name (e.g. "topic"), and these
+    # must match what the platform's metadata-init created.
     - name: tenant
       value: "tenant"
     - name: namespace
       value: "namespace"
     - name: persistent
       value: "true"
-
-    # ================= Subscription (only used if this pubsub also SUBSCRIBES) =========
-    # The custom-client is a producer, so these are inert here.
-    - name: subscriptionType
-      value: "Shared"
-    - name: subscriptionName
-      value: "dapr-subscription"
-    - name: subscriptionInitialPosition
-      value: "Earliest"

@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# End-to-end verification of the pluggable-component design with REAL per-client mTLS
-# auth (no anonymousUserRole). Proves:
-#   producer(curl) -> daprd -> pulsar-pluggable(NewAuthenticationTLS) -> mTLS Pulsar
-#   -> consumer reads the messages back.
+# End-to-end verification of the no-auth setup with Dapr's BUILT-IN Pulsar component:
+#   producer(curl) -> daprd (pubsub.pulsar) -> TLS Pulsar (auth disabled) -> consumer.
 set -uo pipefail
 cd "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 
@@ -10,27 +8,18 @@ DC="docker compose"
 say() { printf '\n\033[1;36m== %s ==\033[0m\n' "$*"; }
 fail() { printf '\n\033[1;31mFAIL: %s\033[0m\n' "$*"; dump; exit 1; }
 dump() {
-  echo "--- pulsar-pluggable ---"; $DC logs --tail=30 pulsar-pluggable 2>/dev/null
-  echo "--- daprd ---";            $DC logs --tail=40 daprd 2>/dev/null | grep -iE "pluggable|pulsar|component|error|initialized" | tail -25
-  echo "--- producer ---";         $DC logs --tail=20 producer 2>/dev/null
-  echo "--- consumer ---";         $DC logs --tail=15 consumer 2>/dev/null
+  echo "--- daprd ---";    $DC logs --tail=40 daprd 2>/dev/null | grep -iE "pulsar|component|error|initialized" | tail -25
+  echo "--- producer ---"; $DC logs --tail=20 producer 2>/dev/null
+  echo "--- consumer ---"; $DC logs --tail=15 consumer 2>/dev/null
 }
 
 say "clean slate"
 $DC down -v --remove-orphans 2>/dev/null
 
-if [[ -n "${PLUGGABLE_IMAGE:-}" ]]; then
-  say "0) using prebuilt pluggable image: ${PLUGGABLE_IMAGE} (skipping build)"
-  docker pull "${PLUGGABLE_IMAGE}" || fail "could not pull ${PLUGGABLE_IMAGE}"
-else
-  say "0) build the pluggable component image"
-  $DC build pulsar-pluggable || fail "component build failed (offline vendored build; see README if behind a proxy)"
-fi
-
-say "1) generate the throwaway Pulsar PKI"
+say "1) generate the throwaway server cert (TLS listener)"
 $DC up --exit-code-from certs-init certs-init || fail "cert generation failed"
 
-say "2) start Pulsar (mTLS, auth ENABLED, no anonymous role) and wait until healthy"
+say "2) start Pulsar (TLS transport, auth DISABLED) and wait until healthy"
 $DC up -d pulsar
 for i in $(seq 1 48); do
   st=$($DC ps pulsar --format '{{.Health}}' 2>/dev/null)
@@ -44,28 +33,23 @@ say "3) start consumer (subscribes @Earliest, auto-creates topic)"
 $DC up -d consumer
 sleep 8
 
-say "4) start the pluggable component (creates the UDS socket)"
-$DC up -d pulsar-pluggable
-sleep 6
-$DC ps pulsar-pluggable --format '{{.Name}} {{.State}}' | sed 's/^/   /'
-
-say "5) start Dapr sidecar (must discover pulsar-pluggable.sock) and wait for init"
+say "4) start Dapr sidecar (built-in pubsub.pulsar) and wait for init"
 $DC up -d daprd
 ok=false
 for i in $(seq 1 24); do
   if $DC logs daprd 2>/dev/null | grep -qiE "Component loaded: pulsar-pubsub|dapr initialized"; then ok=true; break; fi
-  if $DC logs daprd 2>/dev/null | grep -qiE "couldn't find|failed to (find|init).*pulsar|error.*pluggable"; then
-    fail "daprd could not load the pluggable component"
+  if $DC logs daprd 2>/dev/null | grep -qiE "failed to init.*pulsar|error.*pulsar-pubsub"; then
+    fail "daprd could not init the built-in pulsar component"
   fi
   echo "   waiting for daprd init... (${i})"; sleep 3
 done
 [[ "$ok" == "true" ]] || echo "   (warn) couldn't confirm daprd init; continuing to publish anyway"
-$DC logs daprd 2>/dev/null | grep -iE "pulsar-pubsub|pluggable|component loaded|Initialized" | tail -6 | sed 's/^/   /'
+$DC logs daprd 2>/dev/null | grep -iE "pulsar-pubsub|component loaded" | tail -4 | sed 's/^/   /'
 
-say "6) start the curl producer (publishes every 1s via Dapr)"
+say "5) start the curl producer (publishes every 1s via Dapr)"
 $DC up -d producer
 
-say "7) wait for messages to flow, then assert"
+say "6) wait for messages to flow, then assert"
 received=0
 for i in $(seq 1 30); do
   received=$($DC logs consumer 2>/dev/null | grep -c "hello from curl-producer" || true)
@@ -78,12 +62,9 @@ echo; echo "--- producer tail ---"
 $DC logs --tail=8 producer 2>/dev/null | grep -E "PUBLISHED|PUBLISH|publishing" | sed 's/^/   /'
 echo "--- consumer tail ---"
 $DC logs --tail=6 consumer 2>/dev/null | grep -E "got message|content" | sed 's/^/   /'
-echo "--- pluggable component tail ---"
-$DC logs --tail=8 pulsar-pluggable 2>/dev/null | sed 's/^/   /'
 
 if [[ "$received" -ge 1 ]]; then
-  printf '\n\033[1;32mPASS: %s messages went producer(curl) -> Dapr -> pluggable(mTLS auth) -> Pulsar -> consumer\033[0m\n' "$received"
-  echo "(no anonymousUserRole — the broker authenticated the client cert as a real role)"
+  printf '\n\033[1;32mPASS: %s messages went producer(curl) -> Dapr(built-in pubsub.pulsar) -> TLS Pulsar (no auth) -> consumer\033[0m\n' "$received"
   echo "(run '$DC down -v' to clean up)"
   exit 0
 else

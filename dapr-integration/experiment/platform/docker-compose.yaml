@@ -91,7 +91,7 @@ services:
       PULSAR_PREFIX_allowAutoTopicCreationType: "non-partitioned"
       PULSAR_PREFIX_allowAutoSubscriptionCreation: "true"
       PULSAR_PREFIX_authorizationEnabled: "false"
-      PULSAR_PREFIX_authenticationEnabled: "true"
+      PULSAR_PREFIX_authenticationEnabled: "false"
       PULSAR_PREFIX_advertisedAddress: broker
       PULSAR_PREFIX_superUserRoles: spiffe://nonprod.ing.com/v1/P10530/global-dev/broker,spiffe://nonprod.ing.com/v1/P10530/global-dev/proxy,spiffe://nonprod.ing.com/v1/P10530/global-dev/control-plane,spiffe://nonprod.ing.com/v1/P10530/global-dev/client
     volumes:
@@ -121,6 +121,7 @@ services:
       PULSAR_LOG_LEVEL: INFO
       PULSAR_PREFIX_brokerWebServiceURLTLS: ''
       PULSAR_PREFIX_brokerServiceURLTLS: ''
+      PULSAR_PREFIX_authenticationEnabled: "false"
     volumes:
       - ../.ignore.identities/proxy:/data/proxy
       - ../.ignore.identities/trust:/data/trust

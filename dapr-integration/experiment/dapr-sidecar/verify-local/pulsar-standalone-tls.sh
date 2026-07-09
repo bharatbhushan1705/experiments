@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# Verification ONLY: start a stock apachepulsar/pulsar standalone with TLS + mandatory
-# client-certificate (mTLS) auth, using the throwaway certs from gen-test-certs.sh.
-# Stands in for the real mTLS-secured platform so the pipeline can be exercised end to
-# end with public images. Authentication is ENABLED and there is NO anonymous role —
-# the client cert must authenticate as a real role.
+# Verification ONLY: start a stock apachepulsar/pulsar standalone with a TLS listener
+# (self-signed server cert from gen-test-certs.sh) and authentication DISABLED —
+# mirroring the platform's no-auth posture. Clients connect over pulsar+ssl without
+# verifying the cert and without authenticating.
 set -euo pipefail
 CONF=/pulsar/conf/standalone.conf
 CERTS=/certs/pulsar
@@ -17,23 +16,16 @@ done
 
 cat >> "${CONF}" <<EOF
 
-### injected by pulsar-standalone-tls.sh (experiment mTLS) ###
+### injected by pulsar-standalone-tls.sh (experiment TLS transport, NO auth) ###
 brokerServicePortTls=6651
 webServicePortTls=8443
 tlsCertificateFilePath=${CERTS}/server.crt
 tlsKeyFilePath=${CERTS}/server.key
 tlsTrustCertsFilePath=${CERTS}/ca.pem
-tlsRequireTrustedClientCertOnConnect=true
-authenticationEnabled=true
-authenticationProviders=org.apache.pulsar.broker.authentication.AuthenticationProviderTls
+tlsRequireTrustedClientCertOnConnect=false
+authenticationEnabled=false
 authorizationEnabled=false
-superUserRoles=admin
-# the broker's own internal client must present a trusted cert over TLS
-brokerClientTlsEnabled=true
-brokerClientTrustCertsFilePath=${CERTS}/ca.pem
-brokerClientAuthenticationPlugin=org.apache.pulsar.client.impl.auth.AuthenticationTls
-brokerClientAuthenticationParameters=tlsCertFile:${CERTS}/client.crt,tlsKeyFile:${CERTS}/client.key
 EOF
 
-echo "[pulsar-tls] starting standalone (TLS 6651 / 8443, mTLS required)..."
+echo "[pulsar-tls] starting standalone (TLS 6651 / 8443, no auth)..."
 exec bin/pulsar standalone -nss -nfw

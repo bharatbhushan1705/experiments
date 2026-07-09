@@ -1,16 +1,13 @@
-# Self-contained verification of the pluggable-component design (public images + the
-# component built from ../pluggable-component — no private image, no broker tricks).
+# Self-contained verification of the no-auth setup (public images only).
 #
-# Proves REAL per-client mTLS auth end to end:
+# Proves the pipeline with Dapr's BUILT-IN Pulsar component:
 #   producer (curl loop)
-#     -> daprd (loads pubsub.pulsar-pluggable over UDS)
-#     -> pulsar-pluggable (our Go component; NewAuthenticationTLS -> auth_method=tls)
-#     -> Pulsar standalone that REQUIRES a trusted client cert AND authenticates it
-#   consumer reads the topic back over mTLS.
+#     -> daprd (built-in pubsub.pulsar)
+#     -> Pulsar standalone with a TLS listener and authentication DISABLED
+#   consumer reads the topic back.
 #
-# Orchestrated by verify.sh (staged startup: the pluggable socket must exist before
-# daprd boots).
-name: dapr-pluggable-verify
+# Orchestrated by verify.sh.
+name: dapr-builtin-verify
 
 services:
   certs-init:
@@ -22,7 +19,7 @@ services:
       OUT_DIR: /certs/pulsar
     command: ["/bin/bash", "/gen-test-certs.sh"]
 
-  # stand-in for the mTLS platform: authentication ENABLED, no anonymous role.
+  # stand-in for the platform: TLS listener, authentication DISABLED.
   pulsar:
     image: apachepulsar/pulsar:4.1.0
     hostname: pulsar
@@ -37,25 +34,12 @@ services:
       retries: 40
       start_period: 40s
 
-  # our pluggable Pulsar component (real client-cert auth). Creates the UDS socket.
-  pulsar-pluggable:
-    build: ../pluggable-component
-    image: ${PLUGGABLE_IMAGE:-pulsar-pluggable:local}
-    environment:
-      DAPR_COMPONENT_SOCKET_PATH: /tmp/dapr-components-sockets/pulsar-pluggable.sock
-    volumes:
-      - dapr-sockets:/tmp/dapr-components-sockets
-      - certs:/certs:ro
-
-  # the Dapr sidecar: loads pubsub.pulsar-pluggable from the shared socket folder.
   daprd:
     image: daprio/daprd:1.15.4
-    user: "0:0"   # root so it can connect to the socket the component created
     depends_on:
-      pulsar-pluggable:
-        condition: service_healthy   # wait until the UDS socket exists
+      pulsar:
+        condition: service_healthy
     volumes:
-      - dapr-sockets:/tmp/dapr-components-sockets
       - ./components:/components:ro
     command:
       - "./daprd"
@@ -68,15 +52,12 @@ services:
       - "--log-level"
       - "debug"
 
-  # the producer: a curl loop posting to Dapr's publish API (standalone ships
-  # tenant "public" / namespace "default" out of the box)
+  # bare topic name — the built-in component prefixes persistent://public/default/
   producer:
     image: curlimages/curl:latest
     environment:
       DAPR_HTTP: "http://daprd:3500"
       PUBSUB_NAME: "pulsar-pubsub"
-      TENANT: "public"
-      NAMESPACE: "default"
       TOPIC: "topic"
       INTERVAL: "1"
     depends_on:
@@ -85,19 +66,16 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        FULL="persistent://$${TENANT}/$${NAMESPACE}/$${TOPIC}"
-        # URL-encode: daprd's router collapses a raw "//" in the path
-        ENC=$$(printf '%s' "$$FULL" | sed -e 's/:/%3A/g' -e 's|/|%2F|g')
         until curl -fsS "$${DAPR_HTTP}/v1.0/healthz" >/dev/null 2>&1; do
           echo "waiting for daprd..."; sleep 2
         done
-        echo "publishing to $${FULL} every $${INTERVAL}s via $${DAPR_HTTP}"
+        echo "publishing to topic '$${TOPIC}' every $${INTERVAL}s via $${DAPR_HTTP}"
         i=0
         while true; do
           i=$$((i+1))
           BODY="{\"id\":$$i,\"source\":\"curl-producer\",\"ts\":\"$$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"text\":\"hello from curl-producer #$$i\"}"
           if curl -fsS -X POST -H "Content-Type: application/json" -d "$$BODY" \
-               "$${DAPR_HTTP}/v1.0/publish/$${PUBSUB_NAME}/$${ENC}?metadata.rawPayload=true" >/dev/null; then
+               "$${DAPR_HTTP}/v1.0/publish/$${PUBSUB_NAME}/$${TOPIC}?metadata.rawPayload=true" >/dev/null; then
             echo "PUBLISHED $$BODY"
           else
             echo "PUBLISH FAILED (#$$i)"
@@ -107,12 +85,8 @@ services:
 
   consumer:
     image: apachepulsar/pulsar:4.1.0
-    volumes:
-      - certs:/certs:ro
     environment:
       client_brokerServiceUrl: pulsar+ssl://pulsar:6651
-      client_authPlugin: org.apache.pulsar.client.impl.auth.AuthenticationTls
-      client_authParams: tlsCertFile:/certs/pulsar/client.crt,tlsKeyFile:/certs/pulsar/client.key
       client_tlsAllowInsecureConnection: "true"
       client_tlsEnableHostnameVerification: "false"
       client_useKeyStoreTls: "false"
@@ -126,4 +100,3 @@ services:
 
 volumes:
   certs:
-  dapr-sockets:

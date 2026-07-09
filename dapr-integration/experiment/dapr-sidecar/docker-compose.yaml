@@ -1,21 +1,15 @@
-# The Dapr side of the experiment, targeting the local platform cluster.
+# The Dapr side of the experiment, targeting the local platform cluster
+# (authentication DISABLED on the platform — see daprPubSub.yaml for why that
+# allows the BUILT-IN Dapr Pulsar component with no pluggable container).
 #
 #   producer (curl loop)
-#     -> daprd  (loads pubsub.pulsar-pluggable from daprPubSub.yaml)
-#     -> pulsar-pluggable  (presents the client cert -> real mTLS auth to Pulsar)
-#     -> platform proxy (maas-proxy:6651)
-#   consumer reads the topic back directly from the platform over mTLS.
+#     -> daprd  (built-in pubsub.pulsar from daprPubSub.yaml)
+#     -> platform proxy over TLS transport, no auth (pulsar+ssl://maas-proxy:6651)
+#   optional profile-gated consumer reads the topic back.
 #
-# Topic convention is the same as the pulsar-client stack:
-#   persistent://${TENANT:-tenant}/${NAMESPACE:-namespace}/${TOPIC:-topic}
-#
-# Certs: the SAME openssl utility containers the pulsar-client stack uses
-# (../pulsar-client/scripts/extract-pem.sh) extract PEMs in-place from the platform's
-# PKCS12 identities (../.ignore.identities/{admin,trust}). The component and consumer
-# mount those folders directly — same paths and files as the pulsar-client consumer
-# (cert.pem / privkey.key / fullchain.pem).
-#
-# Verified end to end in ./verify-local. Bring this up with ./start.sh.
+# Effective topic: persistent://tenant/namespace/${TOPIC:-topic} — the built-in
+# component adds the tenant/namespace prefix (from daprPubSub.yaml), so the producer
+# publishes with the BARE topic name.
 name: pulsar-dapr
 
 networks:
@@ -24,55 +18,9 @@ networks:
     external: true
 
 services:
-  # ---- same utility as pulsar-client: extract PEMs from the platform keystore ----
-  openssl-keystore-utility:
-    image: ubuntu:latest
-    volumes:
-      - ../.ignore.identities/admin:/home/certs
-      - ../pulsar-client/scripts:/scripts:ro
-    environment:
-      VOLUME_PATH: /home/certs
-      P12_FILE: keystore.p12
-      P12_PASSWORD: ${P12_PASSWORD:-changeme}
-    command:
-      - /bin/bash
-      - /scripts/extract-pem.sh
-
-  openssl-truststore-utility:
-    image: ubuntu:latest
-    volumes:
-      - ../.ignore.identities/trust:/home/certs
-      - ../pulsar-client/scripts:/scripts:ro
-    environment:
-      VOLUME_PATH: /home/certs
-      P12_FILE: truststore.p12
-      P12_PASSWORD: ${P12_PASSWORD:-changeme}
-    command:
-      - /bin/bash
-      - /scripts/extract-pem.sh
-
-  # The pluggable Pulsar component (real client-cert mTLS auth to the platform).
-  pulsar-pluggable:
-    build: ./pluggable-component
-    image: ${PLUGGABLE_IMAGE:-pulsar-pluggable:local}
-    environment:
-      DAPR_COMPONENT_SOCKET_PATH: /tmp/dapr-components-sockets/pulsar-pluggable.sock
-    volumes:
-      - dapr-sockets:/tmp/dapr-components-sockets
-      - ../.ignore.identities/admin:/data/client:ro
-      - ../.ignore.identities/trust:/data/trust:ro
-    depends_on:
-      openssl-keystore-utility:
-        condition: service_completed_successfully
-      openssl-truststore-utility:
-        condition: service_completed_successfully
-    restart: unless-stopped
-
   daprd:
     image: daprio/daprd:1.15.4
-    user: "0:0"   # root: connect to the socket the component created on the shared volume
     volumes:
-      - dapr-sockets:/tmp/dapr-components-sockets
       - ./daprPubSub.yaml:/components/daprPubSub.yaml:ro
     command:
       - "./daprd"
@@ -86,21 +34,14 @@ services:
       - "debug"
     ports:
       - "3500:3500"   # also lets you publish manually: see README
-    depends_on:
-      pulsar-pluggable:
-        condition: service_healthy   # wait until the UDS socket exists
 
   # ---- the producer: a curl loop posting to Dapr's publish API ----
-  # Configurable via env (defaults match the pulsar-client conventions):
-  #   TENANT / NAMESPACE / TOPIC  -> persistent://tenant/namespace/custom-client-topic
-  #   PUBLISH_INTERVAL            -> seconds between messages (default 1)
+  # TOPIC is the BARE name (built-in component prefixes tenant/namespace itself).
   producer:
     image: curlimages/curl:latest
     environment:
       DAPR_HTTP: "http://daprd:3500"
       PUBSUB_NAME: "pulsar-pubsub"
-      TENANT: "${TENANT:-tenant}"
-      NAMESPACE: "${NAMESPACE:-namespace}"
       TOPIC: "${TOPIC:-topic}"
       INTERVAL: "${PUBLISH_INTERVAL:-1}"
     depends_on:
@@ -110,19 +51,16 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        FULL="persistent://$${TENANT}/$${NAMESPACE}/$${TOPIC}"
-        # URL-encode: daprd's router collapses a raw "//" in the path
-        ENC=$$(printf '%s' "$$FULL" | sed -e 's/:/%3A/g' -e 's|/|%2F|g')
         until curl -fsS "$${DAPR_HTTP}/v1.0/healthz" >/dev/null 2>&1; do
           echo "waiting for daprd..."; sleep 2
         done
-        echo "publishing to $${FULL} every $${INTERVAL}s via $${DAPR_HTTP}"
+        echo "publishing to topic '$${TOPIC}' every $${INTERVAL}s via $${DAPR_HTTP} (component adds persistent://tenant/namespace/)"
         i=0
         while true; do
           i=$$((i+1))
           BODY="{\"id\":$$i,\"source\":\"curl-producer\",\"ts\":\"$$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"text\":\"hello from curl-producer #$$i\"}"
           if curl -fsS -X POST -H "Content-Type: application/json" -d "$$BODY" \
-               "$${DAPR_HTTP}/v1.0/publish/$${PUBSUB_NAME}/$${ENC}?metadata.rawPayload=true" >/dev/null; then
+               "$${DAPR_HTTP}/v1.0/publish/$${PUBSUB_NAME}/$${TOPIC}?metadata.rawPayload=true" >/dev/null; then
             echo "PUBLISHED $$BODY"
           else
             echo "PUBLISH FAILED (#$$i)"
@@ -130,39 +68,25 @@ services:
           sleep "$${INTERVAL}"
         done
 
-  # OPTIONAL verification consumer — NOT started by default. The real consumer is the
-  # pulsar-client stack; this one exists only to watch the experiment topic without
-  # touching pulsar-client. Enable with:  docker compose --profile consumer up -d
+  # OPTIONAL verification consumer — NOT started by default (the pulsar-client stack
+  # is the real consumer). Enable with:  docker compose --profile consumer up -d
   consumer:
     image: apachepulsar/pulsar:4.1.0
     container_name: dapr-experiment-consumer
     profiles: ["consumer"]
-    volumes:
-      - ../.ignore.identities/admin:/data/client:ro
-      - ../.ignore.identities/trust:/data/trust:ro
     environment:
       client_brokerServiceUrl: pulsar+ssl://maas-proxy:6651
-      client_authPlugin: org.apache.pulsar.client.impl.auth.AuthenticationTls
-      client_authParams: tlsCertFile:/data/client/cert.pem,tlsKeyFile:/data/client/privkey.key
       client_tlsAllowInsecureConnection: "true"
       client_tlsEnableHostnameVerification: "false"
       client_useKeyStoreTls: "false"
       tenantName: "${TENANT:-tenant}"
       namespaceName: "${NAMESPACE:-namespace}"
       topicName: "${TOPIC:-topic}"
-    depends_on:
-      openssl-keystore-utility:
-        condition: service_completed_successfully
-      openssl-truststore-utility:
-        condition: service_completed_successfully
     command:
       - bash
       - -c
       - |
         bin/apply-config-from-env-with-prefix.py client_ conf/client.conf && \
         exec bin/pulsar-client consume "persistent://$${tenantName}/$${namespaceName}/$${topicName}" \
-          -s custom-client-consumer -p Earliest -n 0
+          -s dapr-experiment-consumer -p Earliest -n 0
     restart: unless-stopped
-
-volumes:
-  dapr-sockets:

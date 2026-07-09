@@ -41,8 +41,6 @@ services:
       client_tlsTrustStorePath: ''
       client_useKeyStoreTls: false
       client_tlsAllowInsecureConnection: true
-      client_authPlugin: org.apache.pulsar.client.impl.auth.AuthenticationTls
-      client_authParams: 'tlsCertFile:/data/client/cert.pem,tlsKeyFile:/data/client/privkey.key'
     volumes:
       - ../.ignore.identities/admin:/data/client
       - ../.ignore.identities/trust:/data/trust
