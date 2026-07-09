@@ -6,15 +6,27 @@
 #   docker compose up -d
 #
 # Configuration (env):
-#   DAPR_HTTP    Dapr sidecar base URL          (default http://daprd:3500)
-#   TOPIC        bare topic name                (default topic; component adds
-#                                                persistent://tenant/namespace/)
-#   INTERVAL     seconds between messages, 0 = as fast as possible   (default 1)
-#   CONCURRENCY  parallel publisher loops       (default 1)
-#   COUNT        messages per loop, 0 = endless (default 0)
-#   LOG_EVERY    log every Nth publish          (default 1; raise for burst runs)
+#   DAPR_HTTP     Dapr sidecar base URL          (default http://daprd:3500)
+#   TOPIC         bare topic name                (default topic; component adds
+#                                                 persistent://tenant/namespace/)
+#   INTERVAL      seconds between messages/bursts, 0 = back-to-back   (default 1)
+#   CONCURRENCY   parallel publisher loops (loop mode)                (default 1)
+#   COUNT         messages (loop) or bursts (burst) per run, 0 = endless (default 0)
+#   LOG_EVERY     log every Nth publish in loop mode                  (default 1)
+#   BURST         >0 switches to BURST mode: publish this many messages per batch
+#                 with ONE parallel keep-alive curl invocation (default 0 = loop mode)
+#   PARALLEL_MAX  parallel connections in burst mode                  (default 50)
 #
-# Example — modest burst: INTERVAL=0 CONCURRENCY=4 LOG_EVERY=200 docker compose up -d
+# Examples:
+#   docker compose up -d                                          # 1 msg/s loop
+#   INTERVAL=0 CONCURRENCY=8 LOG_EVERY=200 docker compose up -d   # ~180 msg/s loop
+#   BURST=5000 INTERVAL=5 docker compose up -d                    # ~2.5K msg/s bursts
+#
+# Notes:
+#  - in burst mode all messages of one batch share the same JSON body (curl applies
+#    one -d to all transfers); use loop mode when every message must be unique.
+#  - with a finite COUNT the restart policy re-runs the batch when it finishes;
+#    stop finite runs with 'docker compose down'.
 name: cots-client
 
 networks:
@@ -33,21 +45,45 @@ services:
       CONCURRENCY: "${CONCURRENCY:-1}"
       COUNT: "${COUNT:-0}"
       LOG_EVERY: "${LOG_EVERY:-1}"
+      BURST: "${BURST:-0}"
+      PARALLEL_MAX: "${PARALLEL_MAX:-50}"
     restart: unless-stopped
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
+        URL="$${DAPR_HTTP}/v1.0/publish/$${PUBSUB_NAME}/$${TOPIC}?metadata.rawPayload=true"
         until curl -fsS "$${DAPR_HTTP}/v1.0/healthz" >/dev/null 2>&1; do
           echo "waiting for daprd at $${DAPR_HTTP}..."; sleep 2
         done
+
+        if [ "$${BURST}" -gt 0 ]; then
+          echo "BURST mode: $${BURST} msgs/batch via one parallel curl (parallel-max $${PARALLEL_MAX}), interval $${INTERVAL}s"
+          n=0; : > /tmp/urls.cfg
+          while [ "$$n" -lt "$${BURST}" ]; do echo "url = \"$$URL\"" >> /tmp/urls.cfg; n=$$((n+1)); done
+          b=0
+          while [ "$${COUNT}" -eq 0 ] || [ "$$b" -lt "$${COUNT}" ]; do
+            b=$$((b+1))
+            BODY="{\"burst\":$$b,\"source\":\"cots-client\",\"ts\":\"$$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"text\":\"hello from cots-client burst $$b\"}"
+            S=$$(date +%s)
+            if curl -fsS -Z --parallel-max "$${PARALLEL_MAX}" -X POST -H "Content-Type: application/json" \
+                 -d "$$BODY" --config /tmp/urls.cfg >/dev/null 2>&1; then
+              E=$$(date +%s); D=$$((E-S)); [ "$$D" -eq 0 ] && D=1
+              echo "BURST $$b: PUBLISHED $${BURST} msgs in $${D}s (~$$((BURST/D)) msg/s)"
+            else
+              echo "BURST $$b: FAILED (some transfers may have errored)"
+            fi
+            [ "$${INTERVAL}" != "0" ] && sleep "$${INTERVAL}"
+          done
+          echo "done ($$b bursts)"; exit 0
+        fi
+
         echo "publishing to topic '$${TOPIC}' via $${DAPR_HTTP} (interval=$${INTERVAL}s, concurrency=$${CONCURRENCY})"
         worker() {
           w=$$1; i=0
           while [ "$${COUNT}" -eq 0 ] || [ "$$i" -lt "$${COUNT}" ]; do
             i=$$((i+1))
             BODY="{\"id\":\"$$w-$$i\",\"source\":\"cots-client\",\"ts\":\"$$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"text\":\"hello from cots-client $$w-$$i\"}"
-            if curl -fsS -X POST -H "Content-Type: application/json" -d "$$BODY" \
-                 "$${DAPR_HTTP}/v1.0/publish/$${PUBSUB_NAME}/$${TOPIC}?metadata.rawPayload=true" >/dev/null; then
+            if curl -fsS -X POST -H "Content-Type: application/json" -d "$$BODY" "$$URL" >/dev/null; then
               [ $$((i % LOG_EVERY)) -eq 0 ] && echo "PUBLISHED $$BODY"
             else
               echo "PUBLISH FAILED ($$w-$$i)"
