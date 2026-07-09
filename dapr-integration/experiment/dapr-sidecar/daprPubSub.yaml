@@ -17,13 +17,15 @@ spec:
     # ================= Client identity (mTLS) — cert configured HERE, in Dapr config =====
     # The pluggable component calls pulsar.NewAuthenticationTLS(tlsCertFile, tlsKeyFile),
     # so Dapr authenticates to Pulsar as a real per-client role (auth_method=tls).
-    # Key MUST be PKCS#8 PEM.
+    # Files are the PEMs the openssl utility (pulsar-client/scripts/extract-pem.sh)
+    # extracts in-place from the platform identities — same paths the pulsar-client
+    # consumer uses. Key MUST be PKCS#8 PEM (extract-pem.sh emits PKCS#8).
     - name: tlsCertFile
-      value: "/certs/client.crt"
+      value: "/data/client/cert.pem"
     - name: tlsKeyFile
-      value: "/certs/client.key"
+      value: "/data/client/privkey.key"
     - name: tlsTrustCertsFilePath
-      value: "/certs/ca.pem"
+      value: "/data/trust/fullchain.pem"
     # Platform SPIFFE certs have no DNS SAN for "proxy"; match client.conf's posture.
     - name: tlsEnableHostnameVerification
       value: "false"

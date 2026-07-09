@@ -3,15 +3,17 @@
 #   custom-client (Java, HTTPS self-signed)  [../custom-client/app]
 #     -> daprd  (loads pubsub.pulsar-pluggable from daprPubSub.yaml)
 #     -> pulsar-pluggable  (presents the client cert -> real mTLS auth to Pulsar)
-#     -> platform proxy:6651
+#     -> platform proxy (maas-proxy:6651)
 #   consumer reads the topic back directly from the platform over mTLS.
 #
-# Certs in ./certs:
-#   client.crt / client.key / ca.pem   <- from the platform identities (scripts/prep-certs.sh)
-#   app-keystore.p12                    <- the app's self-signed HTTPS cert (app-cert-init)
+# Certs: the SAME openssl utility containers the pulsar-client stack uses
+# (../pulsar-client/scripts/extract-pem.sh) extract PEMs in-place from the platform's
+# PKCS12 identities (../.ignore.identities/{admin,trust}). The component and consumer
+# mount those folders directly — same paths and files as the pulsar-client consumer
+# (cert.pem / privkey.key / fullchain.pem). The app's self-signed HTTPS keystore is
+# generated separately into ./certs by app-cert-init.
 #
-# Verified end to end in ./verify-local (stock mTLS Pulsar). Here we point at the
-# real platform. Bring it up with ./start.sh (after the platform is running).
+# Verified end to end in ./verify-local. Bring this up with ./start.sh.
 name: pulsar-dapr
 
 networks:
@@ -20,7 +22,34 @@ networks:
     external: true
 
 services:
-  # generates the app's self-signed HTTPS keystore into ./certs/app-keystore.p12
+  # ---- same utility as pulsar-client: extract PEMs from the platform keystore ----
+  openssl-keystore-utility:
+    image: ubuntu:latest
+    volumes:
+      - ../.ignore.identities/admin:/home/certs
+      - ../pulsar-client/scripts:/scripts:ro
+    environment:
+      VOLUME_PATH: /home/certs
+      P12_FILE: keystore.p12
+      P12_PASSWORD: ${P12_PASSWORD:-changeme}
+    command:
+      - /bin/bash
+      - /scripts/extract-pem.sh
+
+  openssl-truststore-utility:
+    image: ubuntu:latest
+    volumes:
+      - ../.ignore.identities/trust:/home/certs
+      - ../pulsar-client/scripts:/scripts:ro
+    environment:
+      VOLUME_PATH: /home/certs
+      P12_FILE: truststore.p12
+      P12_PASSWORD: ${P12_PASSWORD:-changeme}
+    command:
+      - /bin/bash
+      - /scripts/extract-pem.sh
+
+  # ---- generates the app's self-signed HTTPS keystore into ./certs ----
   app-cert-init:
     image: ubuntu:latest
     volumes:
@@ -31,18 +60,21 @@ services:
       KEYSTORE_PASSWORD: changeme
     command: ["/bin/bash", "/gen-app-cert.sh"]
 
-  # The pluggable Pulsar component. To use YOUR prebuilt image instead of building here,
-  # set PLUGGABLE_IMAGE=<your-acr>/pulsar-pluggable:<tag> (skips the Go build entirely).
+  # The pluggable Pulsar component (real client-cert mTLS auth to the platform).
   pulsar-pluggable:
     build: ./pluggable-component
     image: ${PLUGGABLE_IMAGE:-pulsar-pluggable:local}
     environment:
-      # Your image reads this to place its socket; daprd scans this folder by default.
-      # (The built-in component ignores it and uses the same default folder anyway.)
       DAPR_COMPONENT_SOCKET_PATH: /tmp/dapr-components-sockets/pulsar-pluggable.sock
     volumes:
       - dapr-sockets:/tmp/dapr-components-sockets
-      - ./certs:/certs:ro
+      - ../.ignore.identities/admin:/data/client:ro
+      - ../.ignore.identities/trust:/data/trust:ro
+    depends_on:
+      openssl-keystore-utility:
+        condition: service_completed_successfully
+      openssl-truststore-utility:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   daprd:
@@ -93,23 +125,32 @@ services:
     ports:
       - "8443:8443"
     depends_on:
+      app-cert-init:
+        condition: service_completed_successfully
       daprd:
         condition: service_started
     restart: unless-stopped
 
-  # reads the topic straight from the platform over mTLS (the "other pulsar-client")
+  # reads the topic straight from the platform over mTLS — same config style and
+  # cert paths as the pulsar-client consumer
   consumer:
     image: apachepulsar/pulsar:4.1.0
     container_name: custom-client-consumer
     volumes:
-      - ./certs:/certs:ro
+      - ../.ignore.identities/admin:/data/client:ro
+      - ../.ignore.identities/trust:/data/trust:ro
     environment:
       client_brokerServiceUrl: pulsar+ssl://maas-proxy:6651
       client_authPlugin: org.apache.pulsar.client.impl.auth.AuthenticationTls
-      client_authParams: tlsCertFile:/certs/client.crt,tlsKeyFile:/certs/client.key
+      client_authParams: tlsCertFile:/data/client/cert.pem,tlsKeyFile:/data/client/privkey.key
       client_tlsAllowInsecureConnection: "true"
       client_tlsEnableHostnameVerification: "false"
       client_useKeyStoreTls: "false"
+    depends_on:
+      openssl-keystore-utility:
+        condition: service_completed_successfully
+      openssl-truststore-utility:
+        condition: service_completed_successfully
     command:
       - bash
       - -c

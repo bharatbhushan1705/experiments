@@ -45,7 +45,7 @@ it, so the broker sees `principal=null` unless it accepts anonymous connections.
 | [daprPubSub.yaml](daprPubSub.yaml) | The component: `pubsub.pulsar-pluggable`, cert paths, `serviceUrl`, tenant/namespace. |
 | [pluggable-component/](pluggable-component/) | The Go component (`main.go`) + `Dockerfile`. mTLS via `NewAuthenticationTLS`. |
 | [docker-compose.yaml](docker-compose.yaml) | daprd + pluggable + custom-client + consumer, on the platform network. |
-| [scripts/prep-certs.sh](scripts/prep-certs.sh) | Extracts `client.crt`/`client.key`/`ca.pem` from the platform identities. |
+| (cert extraction) | Reuses [../pulsar-client/scripts/extract-pem.sh](../pulsar-client/scripts/extract-pem.sh) via the same openssl utility containers as pulsar-client — extracts `cert.pem`/`privkey.key`/`fullchain.pem` in-place in `../.ignore.identities/`. |
 | [start.sh](start.sh) | Prep certs → build component → `docker compose up`. |
 | [verify-local/](verify-local/) | Self-contained proof against a stock mTLS Pulsar (no platform needed). |
 
