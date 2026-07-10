@@ -11,6 +11,7 @@ This stack is only the messaging middleware — `daprd` plus its component confi
 [../cots-client/](../cots-client/); run the whole experiment at once with
 [../start-integration.sh](../start-integration.sh).
 
+Forward flow (default):
 ```
  cots-client (curl)                        ../cots-client
     │  POST http://daprd:3500/v1.0/publish/pulsar-pubsub/topic   (bare topic name)
@@ -21,6 +22,24 @@ This stack is only the messaging middleware — `daprd` plus its component confi
  platform Pulsar (authenticationEnabled=false, plain listeners)
     ──►  effective topic: persistent://tenant/namespace/topic
 ```
+
+Reverse flow (`--profile reverse`): a second sidecar `daprd-consumer` subscribes to
+the same topic ([conf/subscription.yaml](conf/subscription.yaml)) and delivers each
+message to the cots-client consumer as a plain HTTP POST — the app consumes from
+Pulsar by doing nothing but serving a webhook:
+```
+ pulsar-client (pulsar-perf produce)       persistent://tenant/namespace/topic
+    ▼
+ platform Pulsar
+    ▼  subscription 'cots-consumer'
+ daprd-consumer  — same pubsub.pulsar component
+    │  POST http://cots-consumer:8080/messages   (raw payload)
+    ▼
+ cots-client consumer (python http.server)     ../cots-client
+```
+The subscription is scoped to app-id `cots-consumer`, so the producer-side `daprd`
+never subscribes — otherwise a durable subscription would sit collecting backlog
+from every forward-flow burst run.
 
 The built-in component **builds the full topic name itself** from its `tenant`/
 `namespace` metadata, so producers publish with the **bare** name (`topic`).
@@ -58,14 +77,15 @@ translates almost 1:1 into the components-contrib patch.
 
 ```bash
 ../platform/start.sh        # platform up first (authenticationEnabled=false)
-./start.sh                  # just daprd
-cd ../cots-client && docker compose up -d      # the producer
+./start.sh                  # just daprd; './start.sh reverse' adds daprd-consumer
+cd ../cots-client && ./start.sh                # the producer
 ```
 
 or everything at once, with an end-to-end assertion:
 
 ```bash
 ../start-integration.sh             # PASS: N messages flowed cots-client -> daprd -> Pulsar -> consumer
+../start-integration.sh reverse     # PASS: pulsar-client -> Pulsar -> daprd-consumer -> cots-client
 ../cleanup-integration.sh clients   # stop the clients, keep the platform
 ```
 

@@ -6,7 +6,12 @@ cd "${DIR}"
 
 docker network create maas-platform-experiment-network 2>/dev/null || true
 
-echo "[1] docker compose up -d"
-docker compose up -d
-
-echo "daprd is up..."
+if [[ "${1:-}" == "reverse" ]]; then
+  echo "[1] docker compose --profile reverse up -d"
+  docker compose --profile reverse up -d
+  echo "daprd and daprd-consumer are up..."
+else
+  echo "[1] docker compose up -d"
+  docker compose up -d
+  echo "daprd is up..."
+fi

@@ -1,4 +1,5 @@
-# curl producer publishing to Pulsar through the Dapr sidecar.
+# forward flow (--profile producerMode): curl producer publishing through the Dapr sidecar.
+# reverse flow (--profile consumerMode): http consumer receiving messages from the consumer sidecar.
 # Env:
 #   DAPR_HTTP     dapr base URL          (default http://daprd:3500)
 #   TOPIC         bare topic name        (default topic)
@@ -14,6 +15,7 @@ networks:
 services:
   producer:
     image: curlimages/curl:latest
+    profiles: ["producerMode"]
     environment:
       DAPR_HTTP: "${DAPR_HTTP:-http://daprd:3500}"
       PUBSUB_NAME: "${PUBSUB_NAME:-pulsar-pubsub}"
@@ -47,3 +49,35 @@ services:
             sleep 1
           fi
         done
+
+  consumer:
+    image: python:3-alpine
+    container_name: cots-consumer
+    profiles: ["consumerMode"]
+    restart: unless-stopped
+    command:
+      - python3
+      - -u
+      - -c
+      - |
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        import base64, json, time
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers.get('Content-Length') or 0))
+                # dapr delivers the raw pulsar payload base64-wrapped in a cloudevent
+                try:
+                    event = json.loads(body)
+                    msg = base64.b64decode(event['data_base64']).decode() if 'data_base64' in event else event.get('data', body.decode(errors='replace'))
+                except Exception:
+                    msg = body.decode(errors='replace')
+                print(time.strftime('%H:%M:%S'), self.path, msg, flush=True)
+                self.send_response(200)
+                self.end_headers()
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+            def log_message(self, *args):
+                pass
+        print('listening on :8080', flush=True)
+        ThreadingHTTPServer(('0.0.0.0', 8080), Handler).serve_forever()

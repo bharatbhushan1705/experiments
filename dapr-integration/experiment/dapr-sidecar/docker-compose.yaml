@@ -23,3 +23,26 @@ services:
       - "debug"
     ports:
       - "3500:3500"
+
+# reverse flow: sidecar for the cots-client consumer; picks up subscription.yaml
+# and POSTs each message to the consumer container
+  daprd-consumer:
+    image: daprio/daprd:1.15.4
+    container_name: daprd-consumer
+    profiles: ["reverse"]
+    volumes:
+      - ./conf:/conf:ro
+    command:
+      - "./daprd"
+      - "--app-id"
+      - "cots-consumer"
+      - "--app-port"
+      - "8080"
+      - "--app-channel-address"
+      - "cots-consumer"
+      - "--dapr-http-port"
+      - "3501"
+      - "--resources-path"
+      - "/conf"
+      - "--log-level"
+      - "debug"
