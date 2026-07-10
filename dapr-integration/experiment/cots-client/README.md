@@ -28,14 +28,14 @@ docker compose logs -f producer                # burst 1: 1000 msgs total, ~2500
 Consumer (reverse flow — subscription and delivery handled by
 [../dapr-sidecar/conf/subscription.yaml](../dapr-sidecar/conf/subscription.yaml)):
 ```bash
-docker compose --profile consumerMode up -d    # or: ./start.sh reverse
+docker compose --profile consumerMode up -d    # or: ./start.sh consumerMode
 docker compose logs -f consumer                # 12:00:01 /messages hello from pulsar-client
 ```
 
 Or run the whole experiment at once (platform must be up):
 ```bash
-../start-integration.sh            # forward: curl producer -> pulsar-client consumer
-../start-integration.sh reverse    # reverse: pulsar-client producer -> http consumer
+../start-integration.sh                 # forward: curl producer -> pulsar-client consumer
+../start-integration.sh consumerMode    # reverse: pulsar-client producer -> http consumer
 ```
 
 ## Throughput

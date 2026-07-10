@@ -6,9 +6,9 @@ cd "${DIR}"
 
 docker network create maas-platform-experiment-network 2>/dev/null || true
 
-if [[ "${1:-}" == "reverse" ]]; then
-  echo "[1] docker compose --profile reverse up -d"
-  docker compose --profile reverse up -d
+if [[ "${1:-}" == "consumerMode" ]]; then
+  echo "[1] docker compose --profile consumerMode up -d"
+  docker compose --profile consumerMode up -d
   echo "daprd and daprd-consumer are up..."
 else
   echo "[1] docker compose up -d"

@@ -29,7 +29,7 @@ services:
   daprd-consumer:
     image: daprio/daprd:1.15.4
     container_name: daprd-consumer
-    profiles: ["reverse"]
+    profiles: ["consumerMode"]
     volumes:
       - ./conf:/conf:ro
     command:

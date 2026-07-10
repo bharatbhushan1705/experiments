@@ -6,7 +6,7 @@ cd "${DIR}"
 
 docker network create maas-platform-experiment-network 2>/dev/null || true
 
-if [[ "${1:-}" == "reverse" ]]; then
+if [[ "${1:-}" == "consumerMode" ]]; then
   echo "[1] docker compose --profile consumerMode up -d"
   docker compose --profile consumerMode up -d
   echo "cots-client consumer is up..."

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start the pulsar-client consumer; 'reverse' also starts the producer.
+# Start the pulsar-client consumer; 'consumerMode' also starts the producer.
 # Needs the platform up with 6650/8080 published.
 set -euo pipefail
 
@@ -8,9 +8,9 @@ cd "${CLIENT_DIR}"
 
 docker network create experimental-maas-client-network 2>/dev/null || true
 
-if [[ "${1:-}" == "reverse" ]]; then
-  echo "[1] docker compose --profile reverse up -d --wait"
-  docker compose --profile reverse up -d --wait --wait-timeout 300
+if [[ "${1:-}" == "consumerMode" ]]; then
+  echo "[1] docker compose --profile consumerMode up -d --wait"
+  docker compose --profile consumerMode up -d --wait --wait-timeout 300
   echo "pulsar-client is up. Logs: docker compose logs -f consumer producer"
 else
   echo "[1] docker compose up -d --wait"

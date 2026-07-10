@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 # Start all components in sequence: platform -> pulsar-client -> dapr-sidecar -> cots-client.
-#   ./start-integration.sh            forward: cots-client producer -> pulsar-client consumer
-#   ./start-integration.sh reverse    reverse: pulsar-client producer -> cots-client consumer
+#   ./start-integration.sh                 cots-client producer -> pulsar-client consumer
+#   ./start-integration.sh consumerMode    pulsar-client producer -> cots-client consumer
 set -uo pipefail
 DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 cd "${DIR}"
 
-MODE="${1:-forward}"
-[[ "$MODE" == "forward" || "$MODE" == "reverse" ]] || { echo "usage: $0 [reverse]" >&2; exit 2; }
+MODE="${1:-producerMode}"
+[[ "$MODE" == "producerMode" || "$MODE" == "consumerMode" ]] || { echo "usage: $0 [consumerMode]" >&2; exit 2; }
 
 say() { printf '\n\033[1;36m== %s ==\033[0m\n' "$*"; }
 fail() { printf '\n\033[1;31mFAIL: %s\033[0m\n' "$*"; dump; exit 1; }
 running() { docker ps --format '{{.Names}}' | grep "^$1\$" >/dev/null; }
 dump() {
   echo "--- daprd ---";    (cd dapr-sidecar && docker compose logs --tail=30 daprd 2>/dev/null | grep -iE "pulsar|component|error" | tail -15)
-  if [[ "$MODE" == "reverse" ]]; then
+  if [[ "$MODE" == "consumerMode" ]]; then
     echo "--- daprd-consumer ---"; docker logs --tail=30 daprd-consumer 2>/dev/null | grep -iE "pulsar|component|subscrib|error" | tail -15
     echo "--- producer ---"; docker logs --tail=10 maas-producer 2>/dev/null
     echo "--- consumer ---"; docker logs --tail=10 cots-consumer 2>/dev/null
@@ -51,20 +51,20 @@ if [[ "$nsfound" != "true" ]]; then
 fi
 echo "   namespace ${NS} exists"
 
-if [[ "$MODE" == "reverse" ]]; then
+if [[ "$MODE" == "consumerMode" ]]; then
 
   say "starting pulsar-client (consumer + producer)"
   if running maas-producer; then
     echo "   already running, skipping"
   else
-    ./pulsar-client/start.sh reverse
+    ./pulsar-client/start.sh consumerMode
   fi
 
   say "starting cots-client (http consumer)"
-  ./cots-client/start.sh reverse
+  ./cots-client/start.sh consumerMode
 
   say "starting dapr-sidecar (daprd + daprd-consumer)"
-  ./dapr-sidecar/start.sh reverse
+  ./dapr-sidecar/start.sh consumerMode
   ok=false
   for i in $(seq 1 24); do
     if docker logs daprd-consumer 2>/dev/null | grep "Component loaded: pulsar-pubsub" >/dev/null; then ok=true; break; fi
