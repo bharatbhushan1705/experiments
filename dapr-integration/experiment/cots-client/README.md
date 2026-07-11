@@ -4,38 +4,32 @@ Showcase: **any COTS application that can make or receive an HTTP call** integra
 with Apache Pulsar through the Dapr sidecar. The app needs **no Pulsar SDK, no
 certificates, no broker addresses**.
 
-Two modes, one per direction:
+Both directions run at once, separated by topic:
 
-- **producerMode** (forward flow): the app publishes by calling Dapr's publish API —
-  `POST http://daprd:3500/v1.0/publish/pulsar-pubsub/<topic>`
-- **consumerMode** (reverse flow): the app consumes by receiving plain HTTP POSTs —
-  the consumer sidecar subscribes to the topic and delivers each message as a webhook
-  to the app. Here that app is a few lines of stock python http.server.
+- **producer** publishes to `topic` by calling Dapr's publish API —
+  `POST http://daprd:3500/v1.0/publish/pulsar-pubsub/topic`
+- **consumer** receives `cots-topic` messages as plain HTTP POSTs — the consumer
+  sidecar subscribes ([../dapr-sidecar/conf/subscription.yaml](../dapr-sidecar/conf/subscription.yaml))
+  and delivers each message as a webhook to the app. Here that app is a few lines of
+  stock python http.server.
 
 Dapr's built-in Pulsar component (configured in
 [../dapr-sidecar/conf/daprPubSub.yaml](../dapr-sidecar/conf/daprPubSub.yaml)) owns the
 broker connection, TLS transport, and tenant/namespace addressing — the effective
-topic is `persistent://tenant/namespace/<topic>`.
+topics are `persistent://tenant/namespace/topic` and `persistent://tenant/namespace/cots-topic`.
 
 ## Run
 
 ```bash
-../dapr-sidecar/start.sh                       # daprd must be up first
-docker compose --profile producerMode up -d    # or: ./start.sh
-docker compose logs -f producer                # burst 1: 1000 msgs total, ~2500 msg/s
-```
-
-Consumer (reverse flow — subscription and delivery handled by
-[../dapr-sidecar/conf/subscription.yaml](../dapr-sidecar/conf/subscription.yaml)):
-```bash
-docker compose --profile consumerMode up -d    # or: ./start.sh consumerMode
-docker compose logs -f consumer                # 12:00:01 /messages hello from pulsar-client
+../dapr-sidecar/start.sh        # sidecars must be up first
+./start.sh                      # producer + consumer
+docker compose logs -f producer # burst 1: 1000 msgs total, ~2500 msg/s
+docker compose logs -f consumer # 12:00:01 /messages hello from pulsar-client
 ```
 
 Or run the whole experiment at once (platform must be up):
 ```bash
-../start-integration.sh                 # forward: curl producer -> pulsar-client consumer
-../start-integration.sh consumerMode    # reverse: pulsar-client producer -> http consumer
+../start-integration.sh
 ```
 
 ## Throughput

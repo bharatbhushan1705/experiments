@@ -11,7 +11,9 @@ This stack is only the messaging middleware — `daprd` plus its component confi
 [../cots-client/](../cots-client/); run the whole experiment at once with
 [../start-integration.sh](../start-integration.sh).
 
-Forward flow (default):
+Both directions run at once; each has its own sidecar and its own topic.
+
+cots-client as producer, on `topic`:
 ```
  cots-client (curl)                        ../cots-client
     │  POST http://daprd:3500/v1.0/publish/pulsar-pubsub/topic   (bare topic name)
@@ -23,12 +25,12 @@ Forward flow (default):
     ──►  effective topic: persistent://tenant/namespace/topic
 ```
 
-Reverse flow (`--profile consumerMode`): a second sidecar `daprd-consumer` subscribes
-to the same topic ([conf/subscription.yaml](conf/subscription.yaml)) and delivers each
+cots-client as consumer, on `cots-topic`: the second sidecar `daprd-consumer`
+subscribes ([conf/subscription.yaml](conf/subscription.yaml)) and delivers each
 message to the cots-client consumer as a plain HTTP POST — the app consumes from
 Pulsar by doing nothing but serving a webhook:
 ```
- pulsar-client (pulsar-perf produce)       persistent://tenant/namespace/topic
+ pulsar-client (pulsar-perf produce)       persistent://tenant/namespace/cots-topic
     ▼
  platform Pulsar
     ▼  subscription 'cots-consumer'
@@ -37,9 +39,8 @@ Pulsar by doing nothing but serving a webhook:
     ▼
  cots-client consumer (python http.server)     ../cots-client
 ```
-The subscription is scoped to app-id `cots-consumer`, so the producer-side `daprd`
-never subscribes — otherwise a durable subscription would sit collecting backlog
-from every forward-flow burst run.
+The subscription is scoped to app-id `cots-consumer`, so only the consumer sidecar
+subscribes to `cots-topic`.
 
 ## Notes
 
@@ -48,9 +49,9 @@ from every forward-flow burst run.
 - Dapr delivers raw Pulsar payloads wrapped in a CloudEvent with `data_base64`,
   even for raw subscriptions — the python consumer decodes it so the log shows the
   actual message text.
-- `docker compose down` only removes services of active profiles — so the
-  per-component cleanup.sh scripts pass the profile flags explicitly
-  (e.g. `--profile consumerMode` in [cleanup.sh](cleanup.sh)).
+- The `cots-consumer` subscription on `cots-topic` is durable;
+  [../cleanup-integration.sh](../cleanup-integration.sh) deletes it via the admin
+  API so it does not collect backlog while the consumer is stopped.
 
 The built-in component **builds the full topic name itself** from its `tenant`/
 `namespace` metadata, so producers publish with the **bare** name (`topic`).
@@ -88,16 +89,16 @@ translates almost 1:1 into the components-contrib patch.
 
 ```bash
 ../platform/start.sh        # platform up first (authenticationEnabled=false)
-./start.sh                  # just daprd; './start.sh consumerMode' adds daprd-consumer
-cd ../cots-client && ./start.sh                # the producer
+./start.sh                  # daprd + daprd-consumer
+cd ../cots-client && ./start.sh                # producer + consumer
 ```
 
-or everything at once, with an end-to-end assertion:
+or everything at once, with an end-to-end assertion of both flows:
 
 ```bash
-../start-integration.sh                  # PASS: N messages flowed cots-client -> daprd -> Pulsar -> consumer
-../start-integration.sh consumerMode     # PASS: pulsar-client -> Pulsar -> daprd-consumer -> cots-client
-../cleanup-integration.sh clients        # stop the clients, keep the platform
+../start-integration.sh             # PASS: cots-client -> daprd -> topic -> pulsar-client
+                                    # PASS: pulsar-client -> cots-topic -> daprd-consumer -> cots-client
+../cleanup-integration.sh clients   # stop the clients, keep the platform
 ```
 
 ### Publish manually

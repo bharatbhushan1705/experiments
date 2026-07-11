@@ -6,12 +6,7 @@ cd "${DIR}"
 
 docker network create maas-platform-experiment-network 2>/dev/null || true
 
-if [[ "${1:-}" == "consumerMode" ]]; then
-  echo "[1] docker compose --profile consumerMode up -d"
-  docker compose --profile consumerMode up -d
-  echo "cots-client consumer is up..."
-else
-  echo "[1] docker compose --profile producerMode up -d"
-  docker compose --profile producerMode up -d
-  echo "cots-client is up..."
-fi
+echo "[1] docker compose up -d"
+docker compose up -d
+
+echo "cots-client is up..."

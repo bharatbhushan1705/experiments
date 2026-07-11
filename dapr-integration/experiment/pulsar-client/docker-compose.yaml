@@ -62,11 +62,10 @@ services:
       - |
         bin/apply-config-from-env-with-prefix.py client_ conf/client.conf && \
         bin/pulsar-perf consume persistent://${tenantName:-tenant}/${namespaceName:-namespace}/topic -s subscription -time 0
-# reverse flow: publish to the topic so the cots-client consumer receives via dapr
+# publishes to cots-topic; the cots-client consumer receives it via dapr
   producer:
     image: p10530maasacr.azurecr.io/ing-maas-pulsar:${revision}
     container_name: maas-producer
-    profiles: ["consumerMode"]
     environment:
       PULSAR_LOG_LEVEL: INFO
       client_webServiceUrl: http://host.docker.internal:8080
@@ -83,4 +82,4 @@ services:
       - |
         bin/apply-config-from-env-with-prefix.py client_ conf/client.conf && \
         echo -n "hello from pulsar-client" > /tmp/payload.txt && \
-        bin/pulsar-perf produce persistent://${tenantName:-tenant}/${namespaceName:-namespace}/topic -r 10 --payload-file /tmp/payload.txt -time 0
+        bin/pulsar-perf produce persistent://${tenantName:-tenant}/${namespaceName:-namespace}/cots-topic -r 10 --payload-file /tmp/payload.txt -time 0

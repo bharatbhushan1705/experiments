@@ -1,5 +1,5 @@
-# forward flow (--profile producerMode): curl producer publishing through the Dapr sidecar.
-# reverse flow (--profile consumerMode): http consumer receiving messages from the consumer sidecar.
+# producer: curl bursts through the Dapr sidecar to 'topic'
+# consumer: http server receiving 'cots-topic' messages from the consumer sidecar
 # Env:
 #   DAPR_HTTP     dapr base URL          (default http://daprd:3500)
 #   TOPIC         bare topic name        (default topic)
@@ -15,7 +15,6 @@ networks:
 services:
   producer:
     image: curlimages/curl:latest
-    profiles: ["producerMode"]
     environment:
       DAPR_HTTP: "${DAPR_HTTP:-http://daprd:3500}"
       PUBSUB_NAME: "${PUBSUB_NAME:-pulsar-pubsub}"
@@ -53,7 +52,6 @@ services:
   consumer:
     image: python:3-alpine
     container_name: cots-consumer
-    profiles: ["consumerMode"]
     restart: unless-stopped
     command:
       - python3
