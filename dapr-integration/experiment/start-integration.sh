@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Start all components in sequence: platform -> pulsar-client -> cots-client -> dapr-sidecar.
 # Both flows run at once, separated by topic:
-#   cots-client produces:  cots-client -> daprd -> 'topic'      -> pulsar-client consumer
+#   cots-client produces:  cots-client -> daprd-producer -> 'topic' -> pulsar-client consumer
 #   cots-client consumes:  pulsar-client -> 'cots-topic' -> daprd-consumer -> cots-client consumer
 set -uo pipefail
 DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -11,9 +11,9 @@ say() { printf '\n\033[1;36m== %s ==\033[0m\n' "$*"; }
 fail() { printf '\n\033[1;31mFAIL: %s\033[0m\n' "$*"; dump; exit 1; }
 running() { docker ps --format '{{.Names}}' | grep "^$1\$" >/dev/null; }
 dump() {
-  echo "--- daprd ---";          docker logs --tail=30 daprd 2>/dev/null | grep -iE "pulsar|component|error" | tail -15
+  echo "--- daprd-producer ---"; docker logs --tail=30 daprd-producer 2>/dev/null | grep -iE "pulsar|component|error" | tail -15
   echo "--- daprd-consumer ---"; docker logs --tail=30 daprd-consumer 2>/dev/null | grep -iE "pulsar|component|subscrib|error" | tail -15
-  echo "--- cots producer ---";  (cd cots-client && docker compose logs --tail=10 producer 2>/dev/null)
+  echo "--- cots producer ---";  docker logs --tail=10 cots-producer 2>/dev/null
   echo "--- cots consumer ---";  docker logs --tail=10 cots-consumer 2>/dev/null
   echo "--- maas producer ---";  docker logs --tail=10 maas-producer 2>/dev/null
   echo "--- maas consumer ---";  docker logs --tail=10 maas-consumer 2>/dev/null
@@ -56,11 +56,11 @@ fi
 say "starting cots-client (producer + consumer)"
 ./cots-client/start.sh
 
-say "starting dapr-sidecar (daprd + daprd-consumer)"
+say "starting dapr-sidecar (daprd-producer + daprd-consumer)"
 ./dapr-sidecar/start.sh
 ok=false
 for i in $(seq 1 24); do
-  if docker logs daprd 2>/dev/null | grep "Component loaded: pulsar-pubsub" >/dev/null \
+  if docker logs daprd-producer 2>/dev/null | grep "Component loaded: pulsar-pubsub" >/dev/null \
      && docker logs daprd-consumer 2>/dev/null | grep "Component loaded: pulsar-pubsub" >/dev/null; then ok=true; break; fi
   echo "   waiting for dapr sidecars... (${i})"; sleep 3
 done
@@ -88,6 +88,6 @@ for i in $(seq 1 12); do
 done
 [[ "$consumed" -ge 1 ]] || fail "no messages seen by the cots-client consumer on 'cots-topic'"
 
-printf '\n\033[1;32mPASS: cots-client -> daprd -> topic -> pulsar-client (%s messages)\033[0m\n' "$produced"
+printf '\n\033[1;32mPASS: cots-client -> daprd-producer -> topic -> pulsar-client (%s messages)\033[0m\n' "$produced"
 printf '\033[1;32mPASS: pulsar-client -> cots-topic -> daprd-consumer -> cots-client (%s messages)\033[0m\n' "$consumed"
 echo "Stop and cleanup ./cleanup-integration.sh"

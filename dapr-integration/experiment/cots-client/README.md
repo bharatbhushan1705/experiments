@@ -7,14 +7,14 @@ certificates, no broker addresses**.
 Both directions run at once, separated by topic:
 
 - **producer** publishes to `topic` by calling Dapr's publish API —
-  `POST http://daprd:3500/v1.0/publish/pulsar-pubsub/topic`
+  `POST http://daprd-producer:3500/v1.0/publish/pulsar-pubsub/topic`
 - **consumer** receives `cots-topic` messages as plain HTTP POSTs — the consumer
-  sidecar subscribes ([../dapr-sidecar/conf/subscription.yaml](../dapr-sidecar/conf/subscription.yaml))
+  sidecar subscribes ([../dapr-sidecar/conf/daprConsumerPubSub.yaml](../dapr-sidecar/conf/daprConsumerPubSub.yaml))
   and delivers each message as a webhook to the app. Here that app is a few lines of
   stock python http.server.
 
 Dapr's built-in Pulsar component (configured in
-[../dapr-sidecar/conf/daprPubSub.yaml](../dapr-sidecar/conf/daprPubSub.yaml)) owns the
+[../dapr-sidecar/conf/daprProducerPubSub.yaml](../dapr-sidecar/conf/daprProducerPubSub.yaml)) owns the
 broker connection, TLS transport, and tenant/namespace addressing — the effective
 topics are `persistent://tenant/namespace/topic` and `persistent://tenant/namespace/cots-topic`.
 

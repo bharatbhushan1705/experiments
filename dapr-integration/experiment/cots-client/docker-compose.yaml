@@ -1,7 +1,7 @@
 # producer: curl bursts through the Dapr sidecar to 'topic'
 # consumer: http server receiving 'cots-topic' messages from the consumer sidecar
 # Env:
-#   DAPR_HTTP     dapr base URL          (default http://daprd:3500)
+#   DAPR_HTTP     dapr base URL          (default http://daprd-producer:3500)
 #   TOPIC         bare topic name        (default topic)
 #   BURST         messages per burst     (default 1000)
 #   PARALLEL_MAX  parallel connections   (default 50)
@@ -15,8 +15,9 @@ networks:
 services:
   producer:
     image: curlimages/curl:latest
+    container_name: cots-producer
     environment:
-      DAPR_HTTP: "${DAPR_HTTP:-http://daprd:3500}"
+      DAPR_HTTP: "${DAPR_HTTP:-http://daprd-producer:3500}"
       PUBSUB_NAME: "${PUBSUB_NAME:-pulsar-pubsub}"
       TOPIC: "${TOPIC:-topic}"
       BURST: "${BURST:-1000}"

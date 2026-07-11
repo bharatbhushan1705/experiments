@@ -6,8 +6,8 @@
 > The full **mTLS** setup (client-cert auth via a custom pluggable component, verified
 > end-to-end) is preserved on branch **`experiment/dapr-pulsar-mtls`**.
 
-This stack is only the messaging middleware — `daprd` plus its component config in
-[conf/daprPubSub.yaml](conf/daprPubSub.yaml). The producer lives in
+This stack is only the messaging middleware — `daprd-producer`/`daprd-consumer` plus their config in
+[conf/daprProducerPubSub.yaml](conf/daprProducerPubSub.yaml). The producer lives in
 [../cots-client/](../cots-client/); run the whole experiment at once with
 [../start-integration.sh](../start-integration.sh).
 
@@ -16,9 +16,9 @@ Both directions run at once; each has its own sidecar and its own topic.
 cots-client as producer, on `topic`:
 ```
  cots-client (curl)                        ../cots-client
-    │  POST http://daprd:3500/v1.0/publish/pulsar-pubsub/topic   (bare topic name)
+    │  POST http://daprd-producer:3500/v1.0/publish/pulsar-pubsub/topic   (bare topic name)
     ▼
- daprd 1.15.4  — BUILT-IN pubsub.pulsar   (conf/daprPubSub.yaml)
+ daprd-producer 1.15.4  — BUILT-IN pubsub.pulsar   (conf/daprProducerPubSub.yaml)
     │  pulsar://maas-proxy:6650  = plain transport, NO auth
     ▼
  platform Pulsar (authenticationEnabled=false, plain listeners)
@@ -26,7 +26,7 @@ cots-client as producer, on `topic`:
 ```
 
 cots-client as consumer, on `cots-topic`: the second sidecar `daprd-consumer`
-subscribes ([conf/subscription.yaml](conf/subscription.yaml)) and delivers each
+subscribes ([conf/daprConsumerPubSub.yaml](conf/daprConsumerPubSub.yaml)) and delivers each
 message to the cots-client consumer as a plain HTTP POST — the app consumes from
 Pulsar by doing nothing but serving a webhook:
 ```
@@ -79,7 +79,7 @@ metadata and wire them to `pulsar.NewAuthenticationTLS(cert, key)` +
 `ClientOptions.TLSTrustCertsFilePath` — the underlying `pulsar-client-go` already
 supports all of it. Once merged and released in daprd, the mTLS setup needs **only
 YAML**: re-enable platform auth and add the cert fields to
-[conf/daprPubSub.yaml](conf/daprPubSub.yaml) with `type: pubsub.pulsar`.
+[conf/daprProducerPubSub.yaml](conf/daprProducerPubSub.yaml) with `type: pubsub.pulsar`.
 
 Branch `experiment/dapr-pulsar-mtls` contains a working, end-to-end-verified reference
 implementation of exactly that wiring (as a pluggable component) — its `Init()` code
@@ -89,14 +89,14 @@ translates almost 1:1 into the components-contrib patch.
 
 ```bash
 ../platform/start.sh        # platform up first (authenticationEnabled=false)
-./start.sh                  # daprd + daprd-consumer
+./start.sh                  # daprd-producer + daprd-consumer
 cd ../cots-client && ./start.sh                # producer + consumer
 ```
 
 or everything at once, with an end-to-end assertion of both flows:
 
 ```bash
-../start-integration.sh             # PASS: cots-client -> daprd -> topic -> pulsar-client
+../start-integration.sh             # PASS: cots-client -> daprd-producer -> topic -> pulsar-client
                                     # PASS: pulsar-client -> cots-topic -> daprd-consumer -> cots-client
 ../cleanup-integration.sh clients   # stop the clients, keep the platform
 ```

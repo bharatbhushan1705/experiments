@@ -6,9 +6,9 @@ networks:
     external: true
 
 services:
-  daprd:
+  daprd-producer:
     image: daprio/daprd:1.15.4
-    container_name: daprd
+    container_name: daprd-producer
     volumes:
       - ./conf:/conf:ro
     command:
@@ -24,7 +24,7 @@ services:
     ports:
       - "3500:3500"
 
-# sidecar for the cots-client consumer; picks up subscription.yaml
+# sidecar for the cots-client consumer; picks up daprConsumerPubSub.yaml
 # and POSTs each cots-topic message to the consumer container
   daprd-consumer:
     image: daprio/daprd:1.15.4

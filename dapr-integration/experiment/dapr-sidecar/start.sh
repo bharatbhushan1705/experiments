@@ -9,4 +9,4 @@ docker network create maas-platform-experiment-network 2>/dev/null || true
 echo "[1] docker compose up -d"
 docker compose up -d
 
-echo "daprd and daprd-consumer are up..."
+echo "daprd-producer and daprd-consumer are up..."
