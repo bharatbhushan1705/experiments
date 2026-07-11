@@ -21,6 +21,8 @@ services:
       - "/conf"
       - "--log-level"
       - "debug"
+      # logs every publish API call; remove if too noisy at burst rates
+      - "--enable-api-logging"
     ports:
       - "3500:3500"
 
