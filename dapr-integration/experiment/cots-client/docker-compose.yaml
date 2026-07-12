@@ -6,6 +6,7 @@
 #   BURST         messages per burst                   (default 1000)
 #   PARALLEL_MAX  parallel connections                 (default 50)
 #   LOG_EVERY     log every Nth burst / Nth message    (default 10)
+#   RATE          paced mode, e.g. 1/s, 30/m, 500/s    (default unset = burst mode)
 name: cots-client
 
 networks:
@@ -24,6 +25,7 @@ services:
       BURST: "${BURST:-1000}"
       PARALLEL_MAX: "${PARALLEL_MAX:-50}"
       LOG_EVERY: "${LOG_EVERY:-10}"
+      RATE: "${RATE:-}"
     restart: unless-stopped
     # bursts churn ~50 new connections each; reuse TIME_WAIT sockets so the
     # ephemeral port range does not run out at high rates
@@ -36,6 +38,22 @@ services:
         until curl -fsS "$${DAPR_HTTP}/v1.0/healthz" >/dev/null 2>&1; do
           echo "waiting for daprd at $${DAPR_HTTP}..."; sleep 2
         done
+        if [ -n "$${RATE}" ]; then
+          i=0; while [ "$$i" -lt "$${LOG_EVERY}" ]; do echo "url = \"$$URL\""; i=$$((i+1)); done > /tmp/urls.cfg
+          echo "publishing at rate $${RATE} to topic '$${TOPIC}'"
+          t=0
+          while :; do
+            BODY="{\"source\":\"cots-client\",\"text\":\"hello from cots-client\"}"
+            if ERR=$$(curl -fsS --rate "$${RATE}" -X POST \
+                 -H "Content-Type: application/json" -d "$$BODY" --config /tmp/urls.cfg 2>&1 >/dev/null); then
+              t=$$((t+LOG_EVERY))
+              echo "sent $$t msgs total (rate $${RATE})"
+            else
+              echo "batch: FAILED ($$(echo "$$ERR" | grep -c .) of $${LOG_EVERY} requests, first: $$(echo "$$ERR" | head -1))"
+              sleep 1
+            fi
+          done
+        fi
         i=0; while [ "$$i" -lt "$${BURST}" ]; do echo "url = \"$$URL\""; i=$$((i+1)); done > /tmp/urls.cfg
         echo "publishing bursts of $${BURST} msgs (parallel-max $${PARALLEL_MAX}) to topic '$${TOPIC}'"
         S=$$(date +%s); b=0

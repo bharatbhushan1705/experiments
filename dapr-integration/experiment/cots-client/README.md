@@ -37,12 +37,22 @@ Or run the whole experiment at once (platform must be up):
 
 ## Throughput
 
-The producer has one fixed mode: endless bursts of `BURST` messages, each burst a
-single `curl -Z` invocation multiplexing over `PARALLEL_MAX` keep-alive connections.
+Default is burst mode: endless bursts of `BURST` messages, each burst a single
+`curl -Z` invocation multiplexing over `PARALLEL_MAX` keep-alive connections.
 
 ```bash
 ./start.sh                                 # bursts of 1000 (default)
 BURST=5000 PARALLEL_MAX=100 ./start.sh
+```
+
+Setting `RATE` switches to paced mode — exact rates over one keep-alive
+connection (`curl --rate`), from 1 msg every few seconds up to hundreds per second:
+
+```bash
+RATE=1/s ./start.sh      # 1 msg/s
+RATE=30/m ./start.sh     # one message every 2 seconds
+RATE=500/s ./start.sh    # smooth 500 msg/s
+./start.sh               # unset RATE = back to burst mode
 ```
 
 **Measured end-to-end** (curl → daprd → built-in component → Pulsar, 2-core machine):
