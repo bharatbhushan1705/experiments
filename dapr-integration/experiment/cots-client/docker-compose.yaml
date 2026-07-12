@@ -1,10 +1,11 @@
 # producer: curl bursts through the Dapr sidecar to 'topic'
 # consumer: http server receiving 'cots-topic' messages from the consumer sidecar
 # Env:
-#   DAPR_HTTP     dapr base URL          (default http://daprd-producer:3500)
-#   TOPIC         bare topic name        (default topic)
-#   BURST         messages per burst     (default 1000)
-#   PARALLEL_MAX  parallel connections   (default 50)
+#   DAPR_HTTP     dapr base URL                        (default http://daprd-producer:3500)
+#   TOPIC         bare topic name                      (default topic)
+#   BURST         messages per burst                   (default 1000)
+#   PARALLEL_MAX  parallel connections                 (default 50)
+#   LOG_EVERY     log every Nth burst / Nth message    (default 10)
 name: cots-client
 
 networks:
@@ -22,6 +23,7 @@ services:
       TOPIC: "${TOPIC:-topic}"
       BURST: "${BURST:-1000}"
       PARALLEL_MAX: "${PARALLEL_MAX:-50}"
+      LOG_EVERY: "${LOG_EVERY:-10}"
     restart: unless-stopped
     # bursts churn ~50 new connections each; reuse TIME_WAIT sockets so the
     # ephemeral port range does not run out at high rates
@@ -42,8 +44,10 @@ services:
           BODY="{\"burst\":$$b,\"source\":\"cots-client\",\"text\":\"hello from cots-client burst $$b\"}"
           if ERR=$$(curl -fsS -Z --parallel-max "$${PARALLEL_MAX}" --parallel-immediate -X POST \
                -H "Content-Type: application/json" -d "$$BODY" --config /tmp/urls.cfg 2>&1 >/dev/null); then
-            E=$$(date +%s); D=$$((E-S)); [ "$$D" -eq 0 ] && D=1
-            echo "burst $$b: $$((b*BURST)) msgs total, ~$$((b*BURST/D)) msg/s"
+            if [ "$$b" -eq 1 ] || [ $$((b % LOG_EVERY)) -eq 0 ]; then
+              E=$$(date +%s); D=$$((E-S)); [ "$$D" -eq 0 ] && D=1
+              echo "burst $$b: $$((b*BURST)) msgs total, ~$$((b*BURST/D)) msg/s"
+            fi
           else
             echo "burst $$b: FAILED ($$(echo "$$ERR" | grep -c .) of $${BURST} requests, first: $$(echo "$$ERR" | head -1))"
             sleep 1
@@ -54,13 +58,17 @@ services:
     image: python:3-alpine
     container_name: cots-consumer
     restart: unless-stopped
+    environment:
+      LOG_EVERY: "${LOG_EVERY:-10}"
     command:
       - python3
       - -u
       - -c
       - |
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-        import base64, json, time
+        import base64, itertools, json, os, time
+        log_every = int(os.environ.get('LOG_EVERY', '10'))
+        count = itertools.count(1)
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
                 body = self.rfile.read(int(self.headers.get('Content-Length') or 0))
@@ -70,7 +78,9 @@ services:
                     msg = base64.b64decode(event['data_base64']).decode() if 'data_base64' in event else event.get('data', body.decode(errors='replace'))
                 except Exception:
                     msg = body.decode(errors='replace')
-                print(time.strftime('%H:%M:%S'), self.path, msg, flush=True)
+                n = next(count)
+                if n == 1 or n % log_every == 0:
+                    print('#%d' % n, time.strftime('%H:%M:%S'), self.path, msg, flush=True)
                 self.send_response(200)
                 self.end_headers()
             def do_GET(self):

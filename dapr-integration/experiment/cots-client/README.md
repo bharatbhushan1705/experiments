@@ -23,9 +23,12 @@ topics are `persistent://tenant/namespace/topic` and `persistent://tenant/namesp
 ```bash
 ../dapr-sidecar/start.sh        # sidecars must be up first
 ./start.sh                      # producer + consumer
-docker compose logs -f producer # burst 1: 1000 msgs total, ~2500 msg/s
-docker compose logs -f consumer # 12:00:01 /messages hello from pulsar-client
+docker compose logs -f producer # burst 10: 10000 msgs total, ~2500 msg/s
+docker compose logs -f consumer # #10 12:00:01 /messages hello from pulsar-client
 ```
+
+Both containers log every 10th burst/message; tune with `LOG_EVERY`
+(`LOG_EVERY=100 ./start.sh` for calmer logs, `LOG_EVERY=1 ./start.sh` for every line).
 
 Or run the whole experiment at once (platform must be up):
 ```bash

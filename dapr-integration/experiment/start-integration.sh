@@ -81,7 +81,9 @@ done
 say "perform check on messages flow: cots-topic (cots-client consumer log)"
 consumed=0
 for i in $(seq 1 12); do
-  consumed=$(docker logs cots-consumer 2>&1 | grep -c "hello from pulsar-client" || true)
+  # consumer logs every Nth message as '#<total> HH:MM:SS /messages <payload>'
+  consumed=$(docker logs cots-consumer 2>&1 | grep "hello from pulsar-client" | tail -1 | grep -oE '^#[0-9]+' | tr -d '#' || true)
+  consumed=${consumed:-0}
   echo "   cots-client consumer received so far: ${consumed} (${i})"
   [[ "$consumed" -ge 1 ]] && break
   sleep 5
