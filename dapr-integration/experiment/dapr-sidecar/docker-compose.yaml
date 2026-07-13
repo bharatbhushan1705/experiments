@@ -20,7 +20,7 @@ services:
       - "--resources-path"
       - "/conf"
       - "--log-level"
-      - "debug"
+      - "info"
       # logs every publish API call; remove if too noisy at burst rates
       - "--enable-api-logging"
     ports:
@@ -46,4 +46,5 @@ services:
       - "--resources-path"
       - "/conf"
       - "--log-level"
-      - "debug"
+      - "info"
+      - "--enable-api-logging"
