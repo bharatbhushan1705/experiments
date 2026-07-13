@@ -35,9 +35,10 @@ Or run the whole experiment at once (platform must be up):
 ../start-integration.sh
 ```
 
-## How the producer command works
+## How the producer works
 
-Step by step through the shell script in [docker-compose.yaml](docker-compose.yaml):
+Step by step through [produce.sh](produce.sh) — one script, two modes; only the
+batch size and the curl flags differ:
 
 | Line | What it does |
 |---|---|
@@ -49,15 +50,16 @@ Step by step through the shell script in [docker-compose.yaml](docker-compose.ya
 | `curl -fsS --rate ${RATE} -X POST -d "$BODY" --config /tmp/urls.cfg` | One curl run = N POSTs at the exact rate over a single keep-alive connection. |
 | `ERR=$(curl ... 2>&1 >/dev/null)` | Captures curl's *errors* into `ERR` while discarding response bodies (order matters: stderr → stdout first, then stdout → /dev/null). |
 | `t=$((t+N)); echo "sent $t msgs total"` | Running total, one log line per batch. |
-| *burst mode:* `/tmp/urls.cfg` with `BURST` lines | Same trick, but `BURST` (default 1000) urls per curl run. |
-| `curl -fsS -Z --parallel-max ${PARALLEL_MAX} --parallel-immediate ...` | `-Z` sends all `BURST` requests concurrently in one curl, over up to `PARALLEL_MAX` keep-alive connections, as fast as they complete — this is what makes burst mode fast. |
+| *burst mode:* `N=${BURST}` | Same url-list trick, but `BURST` (default 1000) urls per curl run. |
+| `CURL_OPTS="-Z --parallel-max ${PARALLEL_MAX} --parallel-immediate"` | `-Z` sends all `BURST` requests concurrently in one curl, over up to `PARALLEL_MAX` keep-alive connections, as fast as they complete — this is what makes burst mode fast. |
 | `[ b -eq 1 ] \|\| [ b % LOG_EVERY -eq 0 ]` | Prints the first burst and then every `LOG_EVERY`-th; the line shows cumulative count and average rate since start. |
-| `echo "burst $b: FAILED ($(echo "$ERR" \| grep -c .) of ${BURST} ...)"` | On failure: `grep -c .` counts curl's error lines = number of failed requests; `head -1` shows the first error. Failures always print, regardless of `LOG_EVERY`. |
+| `echo "batch $b: FAILED ($(echo "$ERR" \| grep -c .) of $N ...)"` | On failure: `grep -c .` counts curl's error lines = number of failed requests; `head -1` shows the first error. Failures always print, regardless of `LOG_EVERY`. |
 
-## How the consumer command works
+## How the consumer works
 
-The consumer is a stock `python http.server` — Dapr's consumer sidecar POSTs every
-`cots-topic` message to it, so "consuming from Pulsar" is just serving a webhook:
+[consume.py](consume.py) is a stock `python http.server` — Dapr's consumer sidecar
+POSTs every `cots-topic` message to it, so "consuming from Pulsar" is just serving
+a webhook:
 
 | Line | What it does |
 |---|---|

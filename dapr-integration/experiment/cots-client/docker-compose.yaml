@@ -1,5 +1,5 @@
-# producer: curl bursts through the Dapr sidecar to 'topic'
-# consumer: http server receiving 'cots-topic' messages from the consumer sidecar
+# producer (produce.sh): curl bursts through the Dapr sidecar to 'topic'
+# consumer (consume.py): http server receiving 'cots-topic' messages from the consumer sidecar
 # Env:
 #   DAPR_HTTP     dapr base URL                        (default http://daprd-producer:3500)
 #   TOPIC         bare topic name                      (default topic)
@@ -31,48 +31,10 @@ services:
     # ephemeral port range does not run out at high rates
     sysctls:
       net.ipv4.tcp_tw_reuse: "1"
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        URL="$${DAPR_HTTP}/v1.0/publish/$${PUBSUB_NAME}/$${TOPIC}?metadata.rawPayload=true"
-        until curl -fsS "$${DAPR_HTTP}/v1.0/healthz" >/dev/null 2>&1; do
-          echo "waiting for daprd at $${DAPR_HTTP}..."; sleep 2
-        done
-        if [ -n "$${RATE}" ]; then
-          # curl --rate paces within one invocation, so batches need a few urls each
-          N="$${LOG_EVERY}"; [ "$$N" -lt 10 ] && N=10
-          i=0; while [ "$$i" -lt "$$N" ]; do echo "url = \"$$URL\""; i=$$((i+1)); done > /tmp/urls.cfg
-          echo "publishing at rate $${RATE} to topic '$${TOPIC}' (log every $$N msgs)"
-          t=0
-          while :; do
-            BODY="{\"source\":\"cots-client\",\"text\":\"hello from cots-client\"}"
-            if ERR=$$(curl -fsS --rate "$${RATE}" -X POST \
-                 -H "Content-Type: application/json" -d "$$BODY" --config /tmp/urls.cfg 2>&1 >/dev/null); then
-              t=$$((t+N))
-              echo "sent $$t msgs total (rate $${RATE})"
-            else
-              echo "batch: FAILED ($$(echo "$$ERR" | grep -c .) of $$N requests, first: $$(echo "$$ERR" | head -1))"
-              sleep 1
-            fi
-          done
-        fi
-        i=0; while [ "$$i" -lt "$${BURST}" ]; do echo "url = \"$$URL\""; i=$$((i+1)); done > /tmp/urls.cfg
-        echo "publishing bursts of $${BURST} msgs (parallel-max $${PARALLEL_MAX}) to topic '$${TOPIC}'"
-        S=$$(date +%s); b=0
-        while :; do
-          b=$$((b+1))
-          BODY="{\"burst\":$$b,\"source\":\"cots-client\",\"text\":\"hello from cots-client burst $$b\"}"
-          if ERR=$$(curl -fsS -Z --parallel-max "$${PARALLEL_MAX}" --parallel-immediate -X POST \
-               -H "Content-Type: application/json" -d "$$BODY" --config /tmp/urls.cfg 2>&1 >/dev/null); then
-            if [ "$$b" -eq 1 ] || [ $$((b % LOG_EVERY)) -eq 0 ]; then
-              E=$$(date +%s); D=$$((E-S)); [ "$$D" -eq 0 ] && D=1
-              echo "burst $$b: $$((b*BURST)) msgs total, ~$$((b*BURST/D)) msg/s"
-            fi
-          else
-            echo "burst $$b: FAILED ($$(echo "$$ERR" | grep -c .) of $${BURST} requests, first: $$(echo "$$ERR" | head -1))"
-            sleep 1
-          fi
-        done
+    volumes:
+      - ./produce.sh:/produce.sh:ro
+    entrypoint: ["/bin/sh"]
+    command: ["/produce.sh"]
 
   consumer:
     image: python:3-alpine
@@ -80,33 +42,6 @@ services:
     restart: unless-stopped
     environment:
       LOG_EVERY: "${LOG_EVERY:-10}"
-    command:
-      - python3
-      - -u
-      - -c
-      - |
-        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-        import base64, itertools, json, os, time
-        log_every = int(os.environ.get('LOG_EVERY', '10'))
-        count = itertools.count(1)
-        class Handler(BaseHTTPRequestHandler):
-            def do_POST(self):
-                body = self.rfile.read(int(self.headers.get('Content-Length') or 0))
-                # dapr delivers the raw pulsar payload base64-wrapped in a cloudevent
-                try:
-                    event = json.loads(body)
-                    msg = base64.b64decode(event['data_base64']).decode() if 'data_base64' in event else event.get('data', body.decode(errors='replace'))
-                except Exception:
-                    msg = body.decode(errors='replace')
-                n = next(count)
-                if n == 1 or n % log_every == 0:
-                    print('#%d' % n, time.strftime('%H:%M:%S'), self.path, msg, flush=True)
-                self.send_response(200)
-                self.end_headers()
-            def do_GET(self):
-                self.send_response(200)
-                self.end_headers()
-            def log_message(self, *args):
-                pass
-        print('listening on :8080', flush=True)
-        ThreadingHTTPServer(('0.0.0.0', 8080), Handler).serve_forever()
+    volumes:
+      - ./consume.py:/consume.py:ro
+    command: ["python3", "-u", "/consume.py"]
