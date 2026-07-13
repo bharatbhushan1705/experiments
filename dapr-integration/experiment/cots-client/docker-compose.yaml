@@ -39,17 +39,19 @@ services:
           echo "waiting for daprd at $${DAPR_HTTP}..."; sleep 2
         done
         if [ -n "$${RATE}" ]; then
-          i=0; while [ "$$i" -lt "$${LOG_EVERY}" ]; do echo "url = \"$$URL\""; i=$$((i+1)); done > /tmp/urls.cfg
-          echo "publishing at rate $${RATE} to topic '$${TOPIC}'"
+          # curl --rate paces within one invocation, so batches need a few urls each
+          N="$${LOG_EVERY}"; [ "$$N" -lt 10 ] && N=10
+          i=0; while [ "$$i" -lt "$$N" ]; do echo "url = \"$$URL\""; i=$$((i+1)); done > /tmp/urls.cfg
+          echo "publishing at rate $${RATE} to topic '$${TOPIC}' (log every $$N msgs)"
           t=0
           while :; do
             BODY="{\"source\":\"cots-client\",\"text\":\"hello from cots-client\"}"
             if ERR=$$(curl -fsS --rate "$${RATE}" -X POST \
                  -H "Content-Type: application/json" -d "$$BODY" --config /tmp/urls.cfg 2>&1 >/dev/null); then
-              t=$$((t+LOG_EVERY))
+              t=$$((t+N))
               echo "sent $$t msgs total (rate $${RATE})"
             else
-              echo "batch: FAILED ($$(echo "$$ERR" | grep -c .) of $${LOG_EVERY} requests, first: $$(echo "$$ERR" | head -1))"
+              echo "batch: FAILED ($$(echo "$$ERR" | grep -c .) of $$N requests, first: $$(echo "$$ERR" | head -1))"
               sleep 1
             fi
           done

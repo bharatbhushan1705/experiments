@@ -51,9 +51,15 @@ connection (`curl --rate`), from 1 msg every few seconds up to hundreds per seco
 ```bash
 RATE=1/s ./start.sh      # 1 msg/s
 RATE=30/m ./start.sh     # one message every 2 seconds
+RATE=1/h ./start.sh      # one message per hour
 RATE=500/s ./start.sh    # smooth 500 msg/s
 ./start.sh               # unset RATE = back to burst mode
 ```
+
+Always give a unit (`/s`, `/m`, `/h`, `/d`) — a bare number like `RATE=1` means
+per **hour** in curl. In paced mode messages go out in batches of at least 10
+urls per curl invocation (pacing happens inside one invocation), so `LOG_EVERY`
+below 10 is raised to 10 there.
 
 **Measured end-to-end** (curl → daprd → built-in component → Pulsar, 2-core machine):
 
