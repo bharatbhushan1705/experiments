@@ -15,6 +15,7 @@ spec:
 
     # topics are published with bare names; the component builds
     # persistent://<tenant>/<namespace>/<topic>
+    # must match the platform tenant/namespace (tenantName/namespaceName there)
     - name: tenant
       value: "tenant"
     - name: namespace

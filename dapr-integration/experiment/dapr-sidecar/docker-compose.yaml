@@ -9,6 +9,11 @@ services:
   daprd-producer:
     image: daprio/daprd:1.15.4
     container_name: daprd-producer
+    # api logging writes one line per publish; cap the log size
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
     volumes:
       - ./conf:/conf:ro
     command:
@@ -31,6 +36,10 @@ services:
   daprd-consumer:
     image: daprio/daprd:1.15.4
     container_name: daprd-consumer
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
     volumes:
       - ./conf:/conf:ro
     command:

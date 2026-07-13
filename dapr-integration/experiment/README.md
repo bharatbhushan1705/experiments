@@ -35,6 +35,22 @@ Both directions run at once, separated by topic:
 | `PRODUCE_RATE` | maas-producer | msgs/s published to `cots-topic` (default 10) |
 | `TENANT` / `NAMESPACE` / `TOPIC` | all | topic addressing (defaults `tenant`/`namespace`/`topic`) |
 
+Naming note: to change the tenant or namespace, update all three places together —
+`TENANT`/`NAMESPACE` for the integration scripts, `tenantName`/`namespaceName` for
+platform and pulsar-client, and the values pinned in
+[dapr-sidecar/conf/daprProducerPubSub.yaml](dapr-sidecar/conf/daprProducerPubSub.yaml).
+
+## Watching the logs
+
+| Container | Command | Healthy line | Volume knob |
+|---|---|---|---|
+| `cots-producer` | `docker logs -f cots-producer` | `burst 20: 20000 msgs total, ~2500 msg/s` (or `sent 50 msgs total (rate 1/s)`) | `LOG_EVERY`, `RATE` |
+| `cots-consumer` | `docker logs -f cots-consumer` | `#120 12:00:04 /messages hello from pulsar-client` | `LOG_EVERY` (lines), `PRODUCE_RATE` (incoming rate) |
+| `daprd-producer` | `docker logs -f daprd-producer` | `HTTP API Called ... code=204` per publish | remove `--enable-api-logging` to silence |
+| `daprd-consumer` | `docker logs -f daprd-consumer` | `Connected consumer ... topic=.../cots-topic` at startup, then quiet — deliveries to the app are not API calls | — |
+| `maas-consumer` | `docker logs -f maas-consumer` | `Throughput received: N msg --- x msg/s` every 10 s | — |
+| `maas-producer` | `docker logs -f maas-producer` | `Throughput produced: ...` every 10 s | `PRODUCE_RATE` |
+
 ## Components
 
 - [platform/](platform/) — the Pulsar cluster (authentication disabled on this branch)

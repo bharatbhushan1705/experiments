@@ -27,6 +27,10 @@ services:
       LOG_EVERY: "${LOG_EVERY:-10}"
       RATE: "${RATE:-}"
     restart: unless-stopped
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
     # bursts churn ~50 new connections each; reuse TIME_WAIT sockets so the
     # ephemeral port range does not run out at high rates
     sysctls:
@@ -40,6 +44,10 @@ services:
     image: python:3-alpine
     container_name: cots-consumer
     restart: unless-stopped
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       LOG_EVERY: "${LOG_EVERY:-10}"
     volumes:
