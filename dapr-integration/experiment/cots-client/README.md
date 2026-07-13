@@ -35,6 +35,43 @@ Or run the whole experiment at once (platform must be up):
 ../start-integration.sh
 ```
 
+## How the producer command works
+
+Step by step through the shell script in [docker-compose.yaml](docker-compose.yaml):
+
+| Line | What it does |
+|---|---|
+| `URL="${DAPR_HTTP}/v1.0/publish/${PUBSUB_NAME}/${TOPIC}?metadata.rawPayload=true"` | Builds the Dapr publish URL. `rawPayload=true` stores the body on the topic as-is instead of wrapping it in a CloudEvent. |
+| `until curl -fsS ${DAPR_HTTP}/v1.0/healthz; do sleep 2` | Waits until the sidecar is ready (`-f` = fail on HTTP errors, `-s` = quiet, `-S` = still show the error). |
+| `[ -n "${RATE}" ]` | `RATE` set → paced mode; unset → falls through to burst mode. |
+| `N=${LOG_EVERY}; [ N -lt 10 ] && N=10` | Paced-mode batch size. `--rate` paces transfers *inside* one curl run, so each run needs several urls; below 10 pacing gets inaccurate, so 10 is the floor. |
+| `while [ i -lt N ]; do echo "url = \"$URL\""; done > /tmp/urls.cfg` | Writes the same URL N times in curl's config-file syntax — one line per message to send. |
+| `curl -fsS --rate ${RATE} -X POST -d "$BODY" --config /tmp/urls.cfg` | One curl run = N POSTs at the exact rate over a single keep-alive connection. |
+| `ERR=$(curl ... 2>&1 >/dev/null)` | Captures curl's *errors* into `ERR` while discarding response bodies (order matters: stderr → stdout first, then stdout → /dev/null). |
+| `t=$((t+N)); echo "sent $t msgs total"` | Running total, one log line per batch. |
+| *burst mode:* `/tmp/urls.cfg` with `BURST` lines | Same trick, but `BURST` (default 1000) urls per curl run. |
+| `curl -fsS -Z --parallel-max ${PARALLEL_MAX} --parallel-immediate ...` | `-Z` sends all `BURST` requests concurrently in one curl, over up to `PARALLEL_MAX` keep-alive connections, as fast as they complete — this is what makes burst mode fast. |
+| `[ b -eq 1 ] \|\| [ b % LOG_EVERY -eq 0 ]` | Prints the first burst and then every `LOG_EVERY`-th; the line shows cumulative count and average rate since start. |
+| `echo "burst $b: FAILED ($(echo "$ERR" \| grep -c .) of ${BURST} ...)"` | On failure: `grep -c .` counts curl's error lines = number of failed requests; `head -1` shows the first error. Failures always print, regardless of `LOG_EVERY`. |
+
+## How the consumer command works
+
+The consumer is a stock `python http.server` — Dapr's consumer sidecar POSTs every
+`cots-topic` message to it, so "consuming from Pulsar" is just serving a webhook:
+
+| Line | What it does |
+|---|---|
+| `log_every = int(os.environ.get('LOG_EVERY', '10'))` | Reads the logging knob from the environment. |
+| `count = itertools.count(1)` | Thread-safe running counter of received messages. |
+| `def do_POST(self):` | Called once per delivered message. |
+| `body = self.rfile.read(int(self.headers.get('Content-Length') or 0))` | Reads the request body — the delivered message. |
+| `event = json.loads(body); base64.b64decode(event['data_base64'])` | Dapr delivers the raw Pulsar payload wrapped in a CloudEvent with the bytes in `data_base64`; this unwraps it back to the original text. Falls back to the raw body if it isn't JSON. |
+| `if n == 1 or n % log_every == 0: print('#%d' % n, ...)` | Logs message #1 (so you see it working immediately) and then every `LOG_EVERY`-th, prefixed with the running total. |
+| `self.send_response(200)` | The ack: any 2xx tells the sidecar the message is processed. A non-2xx (or crash) makes Dapr redeliver it. |
+| `def do_GET` → 200 | Answers the sidecar's startup probes. |
+| `def log_message: pass` | Silences http.server's built-in one-line-per-request logging (the counter above replaces it). |
+| `ThreadingHTTPServer(('0.0.0.0', 8080), Handler).serve_forever()` | Serves on the port the sidecar's `--app-port 8080` points at; threaded so concurrent deliveries don't queue. |
+
 ## Throughput
 
 Default is burst mode: endless bursts of `BURST` messages, each burst a single
