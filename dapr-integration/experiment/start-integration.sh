@@ -10,6 +10,23 @@ cd "${DIR}"
 say() { printf '\n\033[1;36m== %s ==\033[0m\n' "$*"; }
 fail() { printf '\n\033[1;31mFAIL: %s\033[0m\n' "$*"; dump; exit 1; }
 running() { docker ps --format '{{.Names}}' | grep "^$1\$" >/dev/null; }
+wait_for() { # <description> <tries> <pause> <command...>
+  local desc=$1 tries=$2 pause=$3; shift 3
+  for i in $(seq 1 "$tries"); do
+    "$@" && return 0
+    echo "   waiting for ${desc}... (${i})"; sleep "$pause"
+  done
+  return 1
+}
+proxy_up() { docker exec pulsar-proxy bash -c 'exec 3<>/dev/tcp/localhost/6650' 2>/dev/null; }
+ns_exists() {
+  docker run --rm --network maas-platform-experiment-network curlimages/curl:latest \
+    -fsS "http://maas-proxy:8080/admin/v2/namespaces/${TENANT:-tenant}" 2>/dev/null | grep "${NS}" >/dev/null
+}
+sidecars_ready() {
+  docker logs daprd-producer 2>/dev/null | grep "Component loaded: pulsar-pubsub" >/dev/null \
+    && docker logs daprd-consumer 2>/dev/null | grep "Component loaded: pulsar-pubsub" >/dev/null
+}
 dump() {
   echo "--- daprd-producer ---"; docker logs --tail=30 daprd-producer 2>/dev/null | grep -iE "pulsar|component|error" | tail -15
   echo "--- daprd-consumer ---"; docker logs --tail=30 daprd-consumer 2>/dev/null | grep -iE "pulsar|component|subscrib|error" | tail -15
@@ -19,31 +36,17 @@ dump() {
   echo "--- maas consumer ---";  docker logs --tail=10 maas-consumer 2>/dev/null
 }
 
+NS="${TENANT:-tenant}/${NAMESPACE:-namespace}"
+
 say "starting platform"
 if running pulsar-proxy; then
   echo "   already running, skipping"
 else
   ./platform/start.sh
 fi
-for i in $(seq 1 30); do
-  docker exec pulsar-proxy bash -c 'exec 3<>/dev/tcp/localhost/6650' 2>/dev/null && { echo "   proxy port 6650 is up"; break; }
-  echo "   waiting for proxy... (${i})"; sleep 5
-done
-docker exec pulsar-proxy bash -c 'exec 3<>/dev/tcp/localhost/6650' 2>/dev/null || fail "platform proxy not reachable on 6650"
-
-NS="${TENANT:-tenant}/${NAMESPACE:-namespace}"
-nsfound=false
-for i in $(seq 1 12); do
-  if docker run --rm --network maas-platform-experiment-network curlimages/curl:latest \
-       -fsS "http://maas-proxy:8080/admin/v2/namespaces/${TENANT:-tenant}" 2>/dev/null | grep "${NS}" >/dev/null; then
-    nsfound=true; break
-  fi
-  echo "   waiting for namespace ${NS}... (${i})"; sleep 5
-done
-if [[ "$nsfound" != "true" ]]; then
-  echo "   metadata-init did not create ${NS}. Check: docker logs metadata-init" >&2
-  fail "namespace ${NS} not found on the cluster"
-fi
+wait_for "proxy port 6650" 30 5 proxy_up || fail "platform proxy not reachable on 6650"
+echo "   proxy port 6650 is up"
+wait_for "namespace ${NS}" 12 5 ns_exists || fail "namespace ${NS} not found on the cluster (check: docker logs metadata-init)"
 echo "   namespace ${NS} exists"
 
 say "starting pulsar-client (consumer + producer)"
@@ -58,13 +61,7 @@ say "starting cots-client (producer + consumer)"
 
 say "starting dapr-sidecar (daprd-producer + daprd-consumer)"
 ./dapr-sidecar/start.sh
-ok=false
-for i in $(seq 1 24); do
-  if docker logs daprd-producer 2>/dev/null | grep "Component loaded: pulsar-pubsub" >/dev/null \
-     && docker logs daprd-consumer 2>/dev/null | grep "Component loaded: pulsar-pubsub" >/dev/null; then ok=true; break; fi
-  echo "   waiting for dapr sidecars... (${i})"; sleep 3
-done
-[[ "$ok" == "true" ]] || fail "dapr sidecars did not load the pulsar-pubsub component"
+wait_for "dapr sidecars" 24 3 sidecars_ready || fail "dapr sidecars did not load the pulsar-pubsub component"
 echo "   component loaded in both sidecars"
 
 say "perform check on messages flow: topic (pulsar-client consumer stats)"
