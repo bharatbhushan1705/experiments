@@ -82,4 +82,4 @@ services:
       - |
         bin/apply-config-from-env-with-prefix.py client_ conf/client.conf && \
         echo -n "hello from pulsar-client" > /tmp/payload.txt && \
-        bin/pulsar-perf produce persistent://${tenantName:-tenant}/${namespaceName:-namespace}/cots-topic -r 10 --payload-file /tmp/payload.txt -time 0
+        bin/pulsar-perf produce persistent://${tenantName:-tenant}/${namespaceName:-namespace}/cots-topic -r ${PRODUCE_RATE:-10} --payload-file /tmp/payload.txt -time 0

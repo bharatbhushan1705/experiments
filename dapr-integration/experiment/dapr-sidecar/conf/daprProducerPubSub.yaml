@@ -1,3 +1,4 @@
+# shared pubsub component: loaded by both daprd-producer and daprd-consumer
 apiVersion: dapr.io/v1alpha1
 kind: Component
 metadata:
